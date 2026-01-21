@@ -14,10 +14,16 @@ import androidx.compose.ui.unit.dp
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.Message
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.User
 import org.koin.androidx.compose.koinViewModel
+import org.koin.core.parameter.parametersOf
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(viewModel: ChatViewModel = koinViewModel()) {
+fun ChatScreen(
+    modelNameOrUri: String?,
+    isOnline: Boolean?,
+    apiKey: String?,
+    viewModel: ChatViewModel = koinViewModel(parameters = { parametersOf(modelNameOrUri, isOnline, apiKey) })
+) {
     val uiState by viewModel.uiState.collectAsState()
     var prompt by remember { mutableStateOf("") }
 

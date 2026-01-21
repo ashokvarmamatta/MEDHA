@@ -32,27 +32,27 @@ cd medha
 
 ### 2. Download the AI Model
 
-This application requires the **Gemma 2B** model file to function.
+This application requires a Gemma model file to function.
 
-- **Model File:** `gemma-2b-it-gpu-int4.bin`
-- **Download Link:** You can find compatible models on [Kaggle](https://www.kaggle.com/models/google/gemma/frameworks/gemma-cpp). Make sure you download the GPU-compatible `int4` version for the best performance on mobile devices.
+- **For `.bin` files:** You can find compatible models on [Kaggle](https://www.kaggle.com/models/google/gemma/frameworks/gemma-cpp).
+- **For `.tflite` files:** You can find compatible models on [Hugging Face](https://huggingface.co/models?library=tflite&p=1&sort=trending) or [Kaggle](https://www.kaggle.com/models/google/gemma/tfLite).
 
 ### 3. Place the Model on Your Device
 
-The application is hardcoded to look for the model file in the **`Downloads`** folder of your device's external storage.
+The application looks for model files in the **`Downloads`** folder of your device's external storage.
 
 1.  Connect your Android device to your computer.
 2.  Use the following `adb` command to push the model file to the correct location:
 
     ```bash
-    adb push path/to/your/gemma-2b-it-gpu-int4.bin /storage/emulated/0/Download/
+    adb push path/to/your/model.bin /storage/emulated/0/Download/
     ```
 
-    *Replace `path/to/your/` with the actual path to the downloaded model file.*
+    *Replace `path/to/your/model.bin` with the actual path to the downloaded model file.*
 
 ### 4. Grant Storage Permissions
 
-On the first launch, the app will request **"All Files Access"** permission. This is required to read the `gemma-2b-it-gpu-int4.bin` model from the Downloads folder.
+On the first launch, the app will request **"All Files Access"** permission. This is required to read the model from the Downloads folder.
 
 - A toast message will appear to guide you.
 - You will be redirected to the system settings to grant the permission.
@@ -71,6 +71,8 @@ The project follows a standard Android MVVM architecture:
         -   **`model`**: Defines the core data classes (`Message.kt`, `User.kt`, `ChatState.kt`).
     -   **`presentation`**:
         -   **`screens.chat`**: Contains the UI (`ChatScreen.kt`) and the `ChatViewModel.kt`.
+        -   **`screens.menu`**: Contains the `MenuScreen.kt`.
+        -   **`screens.model`**: Contains the `ModelListScreen.kt`.
     -   **`ui.theme`**: Standard Jetpack Compose theme files.
     -   **`MainActivity.kt`**: The main entry point of the application.
     -   **`MedhaApplication.kt`**: The custom `Application` class where Koin is initialized.

@@ -37,6 +37,7 @@ koin = "4.1.1"
 ksp = "2.3.4"
 lifecycleViewmodelCompose = "2.10.0"
 lifecycleRuntimeCompose = "2.10.0"
+gemini = "0.5.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -84,6 +85,7 @@ material = { group = "com.google.android.material", name = "material", version.r
 mediapipe-tasks-genai = { group = "com.google.mediapipe", name = "tasks-genai", version.ref = "mediaPipeTasksGenai" }
 koin-android = { group = "io.insert-koin", name = "koin-android", version.ref = "koin" }
 koin-androidx-compose = { group = "io.insert-koin", name = "koin-androidx-compose", version.ref = "koin" }
+gemini = { group = "com.google.ai.client.generativeai", name = "generativeai", version.ref = "gemini" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

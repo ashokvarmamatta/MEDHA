@@ -75,6 +75,7 @@ dependencies {
     implementation(libs.mediapipe.tasks.genai)
     implementation(libs.koin.android)
     implementation(libs.koin.androidx.compose)
+    implementation(libs.gemini)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.androidx.core)
