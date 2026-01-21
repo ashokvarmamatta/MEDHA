@@ -23,26 +23,56 @@ class ChatViewModel(private val application: Application) : ViewModel() {
     private var llmInference: LlmInference? = null
 
     init {
+        initializeEngine()
+    }
+
+    fun initializeEngine() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                _uiState.update { it.copy(isLoading = true) }
-                val modelPath = File(
+                _uiState.update { it.copy(isLoading = true, error = null) }
+                
+                val modelFile = File(
                     Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
                     "gemma-2b-it-gpu-int4.bin"
-                ).absolutePath
+                )
+                
+                if (!modelFile.exists()) {
+                    _uiState.update { it.copy(
+                        isLoading = false, 
+                        error = "Model file not found at: ${modelFile.absolutePath}. Please ensure the file is in your Downloads folder."
+                    ) }
+                    return@launch
+                }
+
+                if (!modelFile.canRead()) {
+                    _uiState.update { it.copy(
+                        isLoading = false, 
+                        error = "Cannot read model file. Please ensure 'All Files Access' permission is granted for the app."
+                    ) }
+                    return@launch
+                }
+
                 val options = LlmInference.LlmInferenceOptions.builder()
-                    .setModelPath(modelPath)
+                    .setModelPath(modelFile.absolutePath)
                     .setMaxTokens(1000)
                     .build()
+                
                 llmInference = LlmInference.createFromOptions(application, options)
                 _uiState.update { it.copy(isLoading = false) }
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = e.message, isLoading = false) }
+                _uiState.update { it.copy(error = "Initialization error: ${e.message}", isLoading = false) }
             }
         }
     }
 
     fun sendMessage(prompt: String) {
+        if (prompt.isBlank()) return
+        
+        if (llmInference == null) {
+            _uiState.update { it.copy(error = "Engine not initialized. Check model file and permissions.") }
+            return
+        }
+
         _uiState.update {
             it.copy(
                 isLoading = true,
@@ -60,7 +90,7 @@ class ChatViewModel(private val application: Application) : ViewModel() {
                     )
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = e.message, isLoading = false) }
+                _uiState.update { it.copy(error = "Generation error: ${e.message}", isLoading = false) }
             }
         }
     }
