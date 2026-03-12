@@ -1,0 +1,140 @@
+name: Build & Release APK
+
+# Triggers:
+#   1. Push a tag like v1.0, v2.1.3 → builds + creates GitHub Release with APK
+#   2. Manual trigger from GitHub Actions tab → builds + creates Release
+#   3. Push to any branch → builds APK only (no release), downloadable as artifact
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - '**'
+  workflow_dispatch:
+    inputs:
+      release_name:
+        description: 'Release name (e.g. v1.0-beta)'
+        required: false
+        default: ''
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x ./gradlew
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Build Release APK
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Rename APKs
+        run: |
+          # Get version from build.gradle.kts
+          VERSION=$(grep 'versionName' app/build.gradle.kts | head -1 | sed 's/.*"\(.*\)".*/\1/')
+
+          # Debug APK
+          cp app/build/outputs/apk/debug/app-debug.apk MEDHA-v${VERSION}-debug.apk
+
+          # Release APK (unsigned unless signing is configured)
+          if [ -f app/build/outputs/apk/release/app-release-unsigned.apk ]; then
+            cp app/build/outputs/apk/release/app-release-unsigned.apk MEDHA-v${VERSION}-release.apk
+          elif [ -f app/build/outputs/apk/release/app-release.apk ]; then
+            cp app/build/outputs/apk/release/app-release.apk MEDHA-v${VERSION}-release.apk
+          fi
+
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      # Always upload as artifact (available for any branch/PR build)
+      - name: Upload Debug APK as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MEDHA-debug-apk
+          path: MEDHA-*-debug.apk
+          retention-days: 30
+
+      - name: Upload Release APK as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MEDHA-release-apk
+          path: MEDHA-*-release.apk
+          retention-days: 30
+
+      # Create GitHub Release only on tag push or manual trigger
+      - name: Determine release tag
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        id: release_tag
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            # Manual trigger — use input or generate tag
+            TAG="${{ github.event.inputs.release_name }}"
+            if [ -z "$TAG" ]; then
+              TAG="v${{ env.VERSION }}-build.${{ github.run_number }}"
+            fi
+            echo "tag=$TAG" >> $GITHUB_OUTPUT
+            echo "name=MEDHA $TAG" >> $GITHUB_OUTPUT
+          else
+            # Tag push
+            TAG="${GITHUB_REF#refs/tags/}"
+            echo "tag=$TAG" >> $GITHUB_OUTPUT
+            echo "name=MEDHA $TAG" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_tag.outputs.tag }}
+          name: ${{ steps.release_tag.outputs.name }}
+          draft: false
+          prerelease: ${{ contains(steps.release_tag.outputs.tag, 'beta') || contains(steps.release_tag.outputs.tag, 'alpha') }}
+          generate_release_notes: true
+          files: |
+            MEDHA-*-debug.apk
+            MEDHA-*-release.apk
+          body: |
+            ## MEDHA - AI Chat for Android
+
+            ### Download
+            - **`MEDHA-v${{ env.VERSION }}-debug.apk`** — Debug build (recommended for testing, no signing needed)
+            - **`MEDHA-v${{ env.VERSION }}-release.apk`** — Release build
+
+            ### Installation
+            1. Download the **debug APK** from the assets below
+            2. Transfer to your Android device (or download directly on phone)
+            3. Enable **"Install from unknown sources"** if prompted
+            4. Open the APK and tap **Install**
+            5. Follow the in-app setup guide
+
+            ### What's New
+            See the auto-generated changelog below for details.
+
+            ---
+            > **Note:** The debug APK works on any device without signing. For production use, build a signed release APK locally.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
