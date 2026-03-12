@@ -3,16 +3,49 @@ package com.ashes.dev.works.ai.neural.brain.medha.data.remote
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
 import retrofit2.http.Body
+import retrofit2.http.GET
 import retrofit2.http.POST
+import retrofit2.http.Path
 import retrofit2.http.Query
 
 interface GeminiApiService {
-    @POST("v1beta/models/gemini-2.0-flash:generateContent")
+    @POST("v1beta/models/{model}:generateContent")
     suspend fun generateContent(
+        @Path("model") model: String,
         @Query("key") apiKey: String,
         @Body request: GeminiRequest
     ): GeminiResponse
+
+    @GET("v1beta/models")
+    suspend fun listModels(
+        @Query("key") apiKey: String
+    ): GeminiModelsResponse
 }
+
+// --- Models listing ---
+
+@JsonClass(generateAdapter = true)
+data class GeminiModelsResponse(
+    @param:Json(name = "models") val models: List<GeminiModelInfo>? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class GeminiModelInfo(
+    @param:Json(name = "name") val name: String,
+    @param:Json(name = "displayName") val displayName: String? = null,
+    @param:Json(name = "description") val description: String? = null,
+    @param:Json(name = "supportedGenerationMethods") val supportedGenerationMethods: List<String>? = null,
+    @param:Json(name = "inputTokenLimit") val inputTokenLimit: Int? = null,
+    @param:Json(name = "outputTokenLimit") val outputTokenLimit: Int? = null
+) {
+    /** e.g. "models/gemini-2.0-flash" → "gemini-2.0-flash" */
+    val modelId: String get() = name.removePrefix("models/")
+
+    val supportsContentGeneration: Boolean
+        get() = supportedGenerationMethods?.contains("generateContent") == true
+}
+
+// --- Request/Response ---
 
 @JsonClass(generateAdapter = true)
 data class GeminiRequest(
@@ -22,8 +55,8 @@ data class GeminiRequest(
 
 @JsonClass(generateAdapter = true)
 data class GeminiContent(
-    @param:Json(name = "role") val role: String,
-    @param:Json(name = "parts") val parts: List<GeminiPart>
+    @param:Json(name = "role") val role: String? = null,
+    @param:Json(name = "parts") val parts: List<GeminiPart>? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -41,7 +74,8 @@ data class InlineData(
 @JsonClass(generateAdapter = true)
 data class GenerationConfig(
     @param:Json(name = "maxOutputTokens") val maxOutputTokens: Int = 2048,
-    @param:Json(name = "temperature") val temperature: Float = 0.7f
+    @param:Json(name = "temperature") val temperature: Float = 0.7f,
+    @param:Json(name = "responseModalities") val responseModalities: List<String>? = null
 )
 
 @JsonClass(generateAdapter = true)
