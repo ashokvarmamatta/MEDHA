@@ -53,6 +53,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -65,6 +67,7 @@ import com.ashes.dev.works.ai.neural.brain.medha.presentation.screens.chat.ChatV
 import com.ashes.dev.works.ai.neural.brain.medha.ui.theme.AccentCyan
 import com.ashes.dev.works.ai.neural.brain.medha.ui.theme.AccentGold
 import com.ashes.dev.works.ai.neural.brain.medha.ui.theme.AccentGreen
+import com.ashes.dev.works.ai.neural.brain.medha.ui.theme.AccentPink
 import com.ashes.dev.works.ai.neural.brain.medha.ui.theme.StatusError
 import com.ashes.dev.works.ai.neural.brain.medha.ui.theme.StatusSuccess
 import com.ashes.dev.works.ai.neural.brain.medha.ui.theme.StatusWarning
@@ -426,6 +429,10 @@ fun SettingsScreen(
                     }
                 }
 
+                // Where to get API keys
+                Spacer(modifier = Modifier.height(16.dp))
+                ApiKeyProvidersSection()
+
                 Spacer(modifier = Modifier.height(24.dp))
             }
 
@@ -482,6 +489,10 @@ fun SettingsScreen(
                         }
                     }
                 }
+
+                // Where to get models (shown under offline mode)
+                Spacer(modifier = Modifier.height(12.dp))
+                OfflineModelSourcesSection()
 
                 Spacer(modifier = Modifier.height(24.dp))
             }
@@ -778,5 +789,177 @@ private fun StatusRow(label: String, value: String) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
         Text(value, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+// ==================== RESOURCE SECTIONS ====================
+
+@Composable
+private fun OfflineModelSourcesSection() {
+    var expanded by remember { mutableStateOf(false) }
+    val uriHandler = LocalUriHandler.current
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp).animateContentSize()) {
+            Surface(
+                onClick = { expanded = !expanded },
+                color = Color.Transparent,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("\uD83D\uDCE5", fontSize = 18.sp)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text("Where to Get Models", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = AccentGreen)
+                            Text("Download .bin model files for offline use", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                        }
+                    }
+                    Text(if (expanded) "\u25B2" else "\u25BC", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+                }
+            }
+
+            AnimatedVisibility(visible = expanded) {
+                Column(modifier = Modifier.padding(top = 12.dp)) {
+                    ResourceLink("Kaggle \u2014 Google Gemma", "Official Gemma 2B/7B for MediaPipe. Recommended!", AccentGreen, "https://kaggle.com/models/google/gemma", uriHandler, badge = "RECOMMENDED")
+                    ResourceLink("Hugging Face Hub", "Largest model repository \u2014 GGUF, .bin, safetensors", AccentGold, "https://huggingface.co/models", uriHandler)
+                    ResourceLink("Ollama Library", "Curated models \u2014 Llama, Gemma, Phi, Mistral", AccentCyan, "https://ollama.com/library", uriHandler)
+                    ResourceLink("LM Studio", "Desktop app with model browser \u2014 GGUF models", AccentPink, "https://lmstudio.ai", uriHandler)
+                    ResourceLink("GPT4All", "Models optimized for consumer hardware", AccentGreen, "https://gpt4all.io", uriHandler)
+                    ResourceLink("Mozilla Llamafile", "Single-file executables \u2014 model + runtime", AccentGold, "https://github.com/Mozilla-Ocho/llamafile", uriHandler)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ApiKeyProvidersSection() {
+    var expanded by remember { mutableStateOf(false) }
+    val uriHandler = LocalUriHandler.current
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp).animateContentSize()) {
+            Surface(
+                onClick = { expanded = !expanded },
+                color = Color.Transparent,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("\uD83D\uDD11", fontSize = 18.sp)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text("Where to Get API Keys", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = AccentCyan)
+                            Text("Free & paid providers \u2014 tap to expand", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                        }
+                    }
+                    Text(if (expanded) "\u25B2" else "\u25BC", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+                }
+            }
+
+            AnimatedVisibility(visible = expanded) {
+                Column(modifier = Modifier.padding(top = 12.dp)) {
+                    // Free tier providers
+                    Text("Free Tier", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = AccentGreen, modifier = Modifier.padding(bottom = 6.dp))
+                    ResourceLink("Google Gemini \u2014 AI Studio", "Most generous free tier \u2014 Gemini 2.0 Flash, 1.5 Pro", AccentGreen, "https://aistudio.google.com/apikey", uriHandler, badge = "BEST FREE")
+                    ResourceLink("Groq", "Blazing fast \u2014 Llama 3, Mixtral, Gemma", AccentCyan, "https://console.groq.com/keys", uriHandler, badge = "FAST")
+                    ResourceLink("OpenRouter", "Multi-model gateway \u2014 single key, many providers", AccentGold, "https://openrouter.ai/keys", uriHandler, badge = "MULTI")
+                    ResourceLink("NVIDIA NIM", "1000 free credits \u2014 Llama, Mistral", AccentGreen, "https://build.nvidia.com", uriHandler)
+                    ResourceLink("Together AI", "Free credits on signup \u2014 wide model selection", AccentCyan, "https://api.together.ai/settings/api-keys", uriHandler)
+                    ResourceLink("Mistral AI", "Free experiment tier \u2014 Mistral Small, Large", AccentGold, "https://console.mistral.ai/api-keys", uriHandler)
+                    ResourceLink("DeepSeek", "Free credits \u2014 V3, R1 reasoning, Coder", AccentGreen, "https://platform.deepseek.com/api_keys", uriHandler)
+                    ResourceLink("Cohere", "Free trial \u2014 Command R/R+, RAG, embeddings", AccentCyan, "https://dashboard.cohere.com/api-keys", uriHandler)
+                    ResourceLink("Hugging Face", "Free tier for thousands of models", AccentGold, "https://huggingface.co/settings/tokens", uriHandler)
+                    ResourceLink("SambaNova Cloud", "Free tier \u2014 fast custom hardware", AccentGreen, "https://cloud.sambanova.ai/apis", uriHandler)
+                    ResourceLink("Cerebras", "Free tier \u2014 extremely fast inference", AccentCyan, "https://cloud.cerebras.ai", uriHandler)
+                    ResourceLink("Fireworks AI", "Free credits \u2014 fast open models", AccentGold, "https://fireworks.ai/account/api-keys", uriHandler)
+                    ResourceLink("DeepInfra", "Free credits \u2014 serverless inference", AccentGreen, "https://deepinfra.com/dash/api_keys", uriHandler)
+                    ResourceLink("Cloudflare Workers AI", "10K free neurons/day \u2014 edge inference", AccentCyan, "https://dash.cloudflare.com", uriHandler)
+                    ResourceLink("GitHub Models", "Free \u2014 GPT-4o, Llama, Mistral via GitHub", AccentGold, "https://github.com/marketplace/models", uriHandler)
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Paid providers
+                    Text("Paid", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = StatusWarning, modifier = Modifier.padding(bottom = 6.dp))
+                    ResourceLink("OpenAI", "GPT-4o, o1, o3, DALL-E \u2014 prepaid credits", StatusWarning, "https://platform.openai.com/api-keys", uriHandler, badge = "PAID")
+                    ResourceLink("Anthropic Claude", "Claude Opus 4, Sonnet 4 \u2014 billing required", StatusWarning, "https://console.anthropic.com/settings/keys", uriHandler, badge = "PAID")
+                    ResourceLink("Perplexity API", "Search-augmented LLMs with citations", StatusWarning, "https://www.perplexity.ai/settings/api", uriHandler, badge = "PAID")
+                    ResourceLink("Azure OpenAI", "Enterprise OpenAI on Azure \u2014 $200 new account credits", StatusWarning, "https://azure.microsoft.com/en-us/products/ai-services/openai-service", uriHandler, badge = "PAID")
+                    ResourceLink("AWS Bedrock", "Claude, Llama, Mistral on AWS", StatusWarning, "https://aws.amazon.com/bedrock", uriHandler, badge = "PAID")
+                    ResourceLink("Google Vertex AI", "$300 free GCP credits \u2014 Gemini, PaLM, Imagen", StatusWarning, "https://console.cloud.google.com", uriHandler, badge = "PAID")
+                    ResourceLink("Replicate", "Pay-per-second \u2014 open models + image/video/audio", StatusWarning, "https://replicate.com/account/api-tokens", uriHandler, badge = "PAID")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResourceLink(
+    title: String,
+    description: String,
+    accentColor: Color,
+    url: String,
+    uriHandler: UriHandler,
+    badge: String? = null
+) {
+    Surface(
+        onClick = { uriHandler.openUri(url) },
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = accentColor
+                    )
+                    if (badge != null) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = accentColor.copy(alpha = 0.15f)
+                        ) {
+                            Text(
+                                badge,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp, fontWeight = FontWeight.Bold),
+                                color = accentColor
+                            )
+                        }
+                    }
+                }
+                Text(
+                    description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                )
+            }
+            Text("\u2197", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f))
+        }
     }
 }
