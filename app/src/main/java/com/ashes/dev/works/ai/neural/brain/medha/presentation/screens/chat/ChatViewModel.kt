@@ -1,14 +1,19 @@
 package com.ashes.dev.works.ai.neural.brain.medha.presentation.screens.chat
 
 import android.app.Application
+import android.content.ContentValues
+import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
+import android.provider.MediaStore
 import android.util.Base64
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ashes.dev.works.ai.neural.brain.medha.data.remote.GeminiApiService
 import com.ashes.dev.works.ai.neural.brain.medha.data.remote.GeminiContent
+import com.ashes.dev.works.ai.neural.brain.medha.data.remote.GeminiModelInfo
 import com.ashes.dev.works.ai.neural.brain.medha.data.remote.GeminiPart
 import com.ashes.dev.works.ai.neural.brain.medha.data.remote.GeminiRequest
 import com.ashes.dev.works.ai.neural.brain.medha.data.remote.GenerationConfig
@@ -17,9 +22,11 @@ import com.ashes.dev.works.ai.neural.brain.medha.domain.model.AppMode
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.ChatState
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.LogEntry
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.LogLevel
+import com.ashes.dev.works.ai.neural.brain.medha.domain.model.GeneratedImage
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.Message
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.ModelInfo
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.ModelStatus
+import com.ashes.dev.works.ai.neural.brain.medha.domain.model.PromptTemplate
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.User
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import com.squareup.moshi.Moshi
@@ -139,9 +146,12 @@ class ChatViewModel(private val application: Application) : ViewModel() {
             is AppMode.Online -> {
                 llmInference?.close()
                 llmInference = null
-                if (_uiState.value.apiKey.isNotBlank()) {
+                if (_uiState.value.apiKeyValidated) {
                     _uiState.update { it.copy(modelStatus = ModelStatus.Ready) }
                     addLog(LogLevel.INFO, TAG, "Online mode ready (${_uiState.value.onlineModelName})")
+                } else if (_uiState.value.apiKey.isNotBlank()) {
+                    _uiState.update { it.copy(modelStatus = ModelStatus.Error("API key not validated. Test it in Settings.")) }
+                    fetchOnlineModels(_uiState.value.apiKey)
                 } else {
                     _uiState.update { it.copy(modelStatus = ModelStatus.Error("API key required. Set it in Settings.")) }
                 }
@@ -151,10 +161,154 @@ class ChatViewModel(private val application: Application) : ViewModel() {
     }
 
     fun setApiKey(key: String) {
-        _uiState.update { it.copy(apiKey = key) }
-        if (key.isNotBlank() && _uiState.value.appMode is AppMode.Online) {
-            _uiState.update { it.copy(modelStatus = ModelStatus.Ready) }
-            addLog(LogLevel.INFO, TAG, "API key configured - Online mode ready")
+        _uiState.update {
+            it.copy(
+                apiKey = key,
+                apiKeyValidated = false,
+                apiKeyTestResult = null,
+                onlineAvailableModels = emptyList()
+            )
+        }
+        if (key.isNotBlank()) {
+            fetchOnlineModels(key)
+        } else {
+            _uiState.update { it.copy(modelStatus = ModelStatus.Error("API key required")) }
+        }
+    }
+
+    private fun fetchOnlineModels(apiKey: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                _uiState.update { it.copy(isFetchingOnlineModels = true, apiKeyTestResult = null) }
+                addLog(LogLevel.INFO, TAG, "Fetching available models from Gemini API...")
+
+                val api = geminiApi ?: run {
+                    addLog(LogLevel.ERROR, TAG, "API client not initialized")
+                    _uiState.update { it.copy(isFetchingOnlineModels = false, apiKeyTestResult = "API client error") }
+                    return@launch
+                }
+
+                val response = api.listModels(apiKey)
+                val models = response.models
+                    ?.filter { it.supportsContentGeneration }
+                    ?.sortedBy { it.modelId }
+                    ?: emptyList()
+
+                if (models.isEmpty()) {
+                    addLog(LogLevel.WARNING, TAG, "No compatible models found for this API key")
+                    _uiState.update {
+                        it.copy(
+                            isFetchingOnlineModels = false,
+                            onlineAvailableModels = emptyList(),
+                            apiKeyTestResult = "No compatible models found. Check your API key."
+                        )
+                    }
+                } else {
+                    addLog(LogLevel.INFO, TAG, "Found ${models.size} models")
+                    // Auto-select best model: prefer gemini-2.0-flash, then first available
+                    val currentModelId = _uiState.value.onlineModelName
+                    val autoSelect = models.find { it.modelId == currentModelId }
+                        ?: models.find { it.modelId.contains("flash") }
+                        ?: models.first()
+
+                    _uiState.update {
+                        it.copy(
+                            isFetchingOnlineModels = false,
+                            onlineAvailableModels = models,
+                            onlineModelName = autoSelect.modelId,
+                            apiKeyTestResult = "Found ${models.size} models. Select one and tap Test."
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                addLog(LogLevel.ERROR, TAG, "Failed to fetch models: ${e.message}")
+                _uiState.update {
+                    it.copy(
+                        isFetchingOnlineModels = false,
+                        apiKeyTestResult = "Invalid API key or network error: ${e.message?.take(80)}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun selectOnlineModel(model: GeminiModelInfo) {
+        _uiState.update {
+            it.copy(
+                onlineModelName = model.modelId,
+                apiKeyValidated = false,
+                apiKeyTestResult = null
+            )
+        }
+        addLog(LogLevel.INFO, TAG, "Selected online model: ${model.modelId}")
+    }
+
+    fun testApiKeyAndModel() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                _uiState.update { it.copy(isTestingApiKey = true, apiKeyTestResult = "Testing...") }
+                val apiKey = _uiState.value.apiKey
+                val modelName = _uiState.value.onlineModelName
+
+                addLog(LogLevel.INFO, TAG, "Testing API key with model: $modelName")
+
+                val api = geminiApi ?: run {
+                    _uiState.update { it.copy(isTestingApiKey = false, apiKeyTestResult = "API client error") }
+                    return@launch
+                }
+
+                val request = GeminiRequest(
+                    contents = listOf(
+                        GeminiContent(role = "user", parts = listOf(GeminiPart(text = "Say hello in one word.")))
+                    ),
+                    generationConfig = GenerationConfig(maxOutputTokens = 10, temperature = 0.1f)
+                )
+
+                val response = api.generateContent(modelName, apiKey, request)
+
+                if (response.error != null) {
+                    val errMsg = response.error.message ?: "API error (code: ${response.error.code})"
+                    addLog(LogLevel.ERROR, TAG, "Test failed: $errMsg")
+                    _uiState.update {
+                        it.copy(
+                            isTestingApiKey = false,
+                            apiKeyValidated = false,
+                            apiKeyTestResult = "Test failed: $errMsg"
+                        )
+                    }
+                } else {
+                    val text = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text?.trim()
+                    if (!text.isNullOrEmpty()) {
+                        addLog(LogLevel.INFO, TAG, "Test passed! Model responded: $text")
+                        _uiState.update {
+                            it.copy(
+                                isTestingApiKey = false,
+                                apiKeyValidated = true,
+                                apiKeyTestResult = "Test passed! Model responded: \"$text\"",
+                                modelStatus = ModelStatus.Ready
+                            )
+                        }
+                    } else {
+                        addLog(LogLevel.WARNING, TAG, "Test returned empty response")
+                        _uiState.update {
+                            it.copy(
+                                isTestingApiKey = false,
+                                apiKeyValidated = false,
+                                apiKeyTestResult = "Model returned empty response. Try a different model."
+                            )
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                addLog(LogLevel.ERROR, TAG, "Test error: ${e.message}")
+                _uiState.update {
+                    it.copy(
+                        isTestingApiKey = false,
+                        apiKeyValidated = false,
+                        apiKeyTestResult = "Error: ${e.message?.take(100)}"
+                    )
+                }
+            }
         }
     }
 
@@ -162,9 +316,38 @@ class ChatViewModel(private val application: Application) : ViewModel() {
         _uiState.update { it.copy(pendingImageUri = uri) }
         if (uri != null) {
             addLog(LogLevel.INFO, TAG, "Image attached for analysis")
+            // If there's a pending image template, show the response style picker
+            if (_uiState.value.pendingImageTemplate != null) {
+                _uiState.update { it.copy(showImageResponseStylePicker = true) }
+            }
         } else {
             addLog(LogLevel.DEBUG, TAG, "Image attachment removed")
+            // Clear template flow if image is removed
+            _uiState.update { it.copy(pendingImageTemplate = null, showImageResponseStylePicker = false) }
         }
+    }
+
+    fun setPendingImageTemplate(template: PromptTemplate?) {
+        _uiState.update { it.copy(pendingImageTemplate = template) }
+    }
+
+    fun dismissImageResponseStylePicker() {
+        _uiState.update { it.copy(showImageResponseStylePicker = false, pendingImageTemplate = null) }
+    }
+
+    fun sendImageWithStyle(style: ImageResponseStyle) {
+        val template = _uiState.value.pendingImageTemplate ?: return
+        val styleInstruction = when (style) {
+            ImageResponseStyle.SHORT -> "Keep the response brief and concise (2-3 sentences max)."
+            ImageResponseStyle.DETAILED -> "Provide a detailed and thorough response."
+            ImageResponseStyle.FULL -> "Provide the most comprehensive and exhaustive analysis possible. Cover every detail."
+            ImageResponseStyle.BULLET_POINTS -> "Format the response as organized bullet points."
+            ImageResponseStyle.TECHNICAL -> "Provide a technical analysis with precise terminology."
+        }
+        val finalPrompt = "${template.promptPrefix}\n\n$styleInstruction"
+
+        _uiState.update { it.copy(showImageResponseStylePicker = false, pendingImageTemplate = null) }
+        sendMessage(finalPrompt)
     }
 
     fun togglePromptTemplates() {
@@ -190,7 +373,13 @@ class ChatViewModel(private val application: Application) : ViewModel() {
     fun initializeEngine() {
         if (_uiState.value.appMode is AppMode.Online) {
             _uiState.update {
-                it.copy(modelStatus = if (it.apiKey.isNotBlank()) ModelStatus.Ready else ModelStatus.Error("API key required"))
+                it.copy(
+                    modelStatus = when {
+                        it.apiKeyValidated -> ModelStatus.Ready
+                        it.apiKey.isNotBlank() -> ModelStatus.Error("API key not validated. Test it in Settings.")
+                        else -> ModelStatus.Error("API key required. Set it in Settings.")
+                    }
+                )
             }
             return
         }
@@ -365,12 +554,25 @@ class ChatViewModel(private val application: Application) : ViewModel() {
                 // Add current message with parts
                 contents.add(GeminiContent(role = "user", parts = currentParts))
 
+                // Enable image output only for models known to support it
+                // Only gemini-2.0-flash and gemini-2.5-flash (non-lite, non-thinking) support image generation
+                val modelName = _uiState.value.onlineModelName
+                val supportsImageOutput = (modelName == "gemini-2.0-flash" ||
+                        modelName == "gemini-2.0-flash-001" ||
+                        modelName == "gemini-2.5-flash" ||
+                        modelName == "gemini-2.5-flash-preview-04-17")
+                val modalities = if (supportsImageOutput) listOf("TEXT", "IMAGE") else null
+
                 val request = GeminiRequest(
                     contents = contents,
-                    generationConfig = GenerationConfig(maxOutputTokens = 2048, temperature = 0.7f)
+                    generationConfig = GenerationConfig(
+                        maxOutputTokens = 2048,
+                        temperature = 0.7f,
+                        responseModalities = modalities
+                    )
                 )
 
-                val response = api.generateContent(apiKey, request)
+                val response = api.generateContent(modelName, apiKey, request)
                 val elapsed = System.currentTimeMillis() - startTime
 
                 if (response.error != null) {
@@ -378,12 +580,30 @@ class ChatViewModel(private val application: Application) : ViewModel() {
                     addLog(LogLevel.ERROR, TAG, "API error: $errMsg")
                     appendAiMessage("API Error: $errMsg")
                 } else {
-                    val text = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text?.trim()
-                    if (text.isNullOrEmpty()) {
+                    val parts = response.candidates?.firstOrNull()?.content?.parts ?: emptyList()
+
+                    // Extract text parts
+                    val textParts = parts.mapNotNull { it.text?.trim() }.filter { it.isNotEmpty() }
+                    val responseText = textParts.joinToString("\n\n")
+
+                    // Extract image parts
+                    val imageParts = parts.mapNotNull { part ->
+                        part.inlineData?.let { data ->
+                            if (data.mimeType.startsWith("image/")) {
+                                GeneratedImage(
+                                    base64Data = data.data,
+                                    mimeType = data.mimeType
+                                )
+                            } else null
+                        }
+                    }
+
+                    if (responseText.isEmpty() && imageParts.isEmpty()) {
                         appendAiMessage("The API returned an empty response. Please try again.")
                     } else {
-                        appendAiMessage(text)
-                        addLog(LogLevel.INFO, TAG, "Online response in ${elapsed}ms (${text.length} chars)")
+                        val displayText = responseText.ifEmpty { if (imageParts.isNotEmpty()) "Here's the generated image:" else "" }
+                        appendAiMessageWithImages(displayText, imageParts)
+                        addLog(LogLevel.INFO, TAG, "Online response in ${elapsed}ms (${responseText.length} chars, ${imageParts.size} images)")
                     }
                 }
                 _uiState.update { it.copy(isGenerating = false) }
@@ -416,6 +636,67 @@ class ChatViewModel(private val application: Application) : ViewModel() {
         _uiState.update { it.copy(messages = it.messages + Message(text = text, user = User.AI)) }
     }
 
+    private fun appendAiMessageWithImages(text: String, images: List<GeneratedImage>) {
+        _uiState.update {
+            it.copy(messages = it.messages + Message(text = text, user = User.AI, generatedImages = images))
+        }
+    }
+
+    fun saveGeneratedImage(image: GeneratedImage): String? {
+        return try {
+            val bytes = Base64.decode(image.base64Data, Base64.DEFAULT)
+            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                ?: run {
+                    addLog(LogLevel.ERROR, TAG, "Failed to decode image bytes")
+                    return null
+                }
+
+            val extension = when {
+                image.mimeType.contains("png") -> "png"
+                image.mimeType.contains("webp") -> "webp"
+                else -> "jpg"
+            }
+            val fileName = "MEDHA_${System.currentTimeMillis()}.$extension"
+            val compressFormat = when (extension) {
+                "png" -> android.graphics.Bitmap.CompressFormat.PNG
+                "webp" -> android.graphics.Bitmap.CompressFormat.WEBP_LOSSY
+                else -> android.graphics.Bitmap.CompressFormat.JPEG
+            }
+
+            val contentValues = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                put(MediaStore.Images.Media.MIME_TYPE, image.mimeType)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/MEDHA")
+                    put(MediaStore.Images.Media.IS_PENDING, 1)
+                }
+            }
+
+            val resolver = application.contentResolver
+            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+                ?: run {
+                    addLog(LogLevel.ERROR, TAG, "Failed to create MediaStore entry")
+                    return null
+                }
+
+            resolver.openOutputStream(uri)?.use { out ->
+                bitmap.compress(compressFormat, 95, out)
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                contentValues.clear()
+                contentValues.put(MediaStore.Images.Media.IS_PENDING, 0)
+                resolver.update(uri, contentValues, null, null)
+            }
+
+            addLog(LogLevel.INFO, TAG, "Image saved: $fileName")
+            uri.toString()
+        } catch (e: Exception) {
+            addLog(LogLevel.ERROR, TAG, "Save image failed: ${e.message}")
+            null
+        }
+    }
+
     fun clearChat() {
         _uiState.update { it.copy(messages = emptyList(), pendingImageUri = null) }
         addLog(LogLevel.INFO, TAG, "Chat cleared")
@@ -430,4 +711,12 @@ class ChatViewModel(private val application: Application) : ViewModel() {
         llmInference?.close()
         llmInference = null
     }
+}
+
+enum class ImageResponseStyle(val label: String, val icon: String, val description: String) {
+    SHORT("Short", "\u26A1", "Quick 2-3 sentence summary"),
+    DETAILED("Detailed", "\uD83D\uDD0D", "Thorough and detailed response"),
+    FULL("Full Analysis", "\uD83D\uDCDD", "Comprehensive, covers everything"),
+    BULLET_POINTS("Bullet Points", "\uD83D\uDCCB", "Organized as bullet points"),
+    TECHNICAL("Technical", "\u2699\uFE0F", "Technical with precise terms")
 }
