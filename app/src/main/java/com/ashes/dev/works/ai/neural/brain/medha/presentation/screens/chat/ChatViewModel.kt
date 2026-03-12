@@ -23,6 +23,7 @@ import com.ashes.dev.works.ai.neural.brain.medha.data.repository.SettingsReposit
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.ApiKeyEntry
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.AppMode
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.ChatState
+import com.ashes.dev.works.ai.neural.brain.medha.domain.model.CustomGrandMaster
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.GeneratedImage
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.GrandMaster
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.LogEntry
@@ -41,6 +42,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -84,11 +86,14 @@ class ChatViewModel(
 
                 val appMode = if (savedMode == "online") AppMode.Online else AppMode.Offline
 
+                val customGMs = settingsRepository.customGrandMastersFlow.first()
+
                 _uiState.update {
                     it.copy(
                         apiKeys = savedKeys,
                         onlineModelName = savedModel,
-                        appMode = appMode
+                        appMode = appMode,
+                        customGrandMasters = customGMs
                     )
                 }
 
@@ -442,11 +447,110 @@ class ChatViewModel(
         _uiState.update { it.copy(showGrandMasterPicker = false) }
     }
 
-    fun activateGrandMaster(grandMaster: GrandMaster) {
+    /** Called when user taps a built-in Grand Master — checks for saved chat first */
+    fun requestActivateGrandMaster(grandMaster: GrandMaster) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val savedMessages = settingsRepository.loadChatHistory("gm_${grandMaster.name}")
+            if (savedMessages.isNotEmpty()) {
+                // Previous chat exists — ask user to resume or reset
+                _uiState.update {
+                    it.copy(
+                        showGrandMasterPicker = false,
+                        showResumeOrResetDialog = true,
+                        pendingGrandMaster = grandMaster,
+                        pendingCustomGrandMaster = null
+                    )
+                }
+            } else {
+                // No saved chat — start fresh
+                activateGrandMasterFresh(grandMaster)
+            }
+        }
+    }
+
+    /** Called when user taps a custom Grand Master — checks for saved chat first */
+    fun requestActivateCustomGrandMaster(custom: CustomGrandMaster) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val savedMessages = settingsRepository.loadChatHistory(custom.chatHistoryKey)
+            if (savedMessages.isNotEmpty()) {
+                _uiState.update {
+                    it.copy(
+                        showGrandMasterPicker = false,
+                        showResumeOrResetDialog = true,
+                        pendingGrandMaster = null,
+                        pendingCustomGrandMaster = custom
+                    )
+                }
+            } else {
+                activateCustomGrandMasterFresh(custom)
+            }
+        }
+    }
+
+    /** Resume previous chat for the pending Grand Master */
+    fun resumeGrandMasterChat() {
+        val pendingGM = _uiState.value.pendingGrandMaster
+        val pendingCustom = _uiState.value.pendingCustomGrandMaster
+        viewModelScope.launch(Dispatchers.IO) {
+            if (pendingGM != null) {
+                val saved = settingsRepository.loadChatHistory("gm_${pendingGM.name}")
+                _uiState.update {
+                    it.copy(
+                        activeGrandMaster = pendingGM,
+                        activeCustomGrandMaster = null,
+                        showResumeOrResetDialog = false,
+                        showGrandMasterPicker = false,
+                        pendingGrandMaster = null,
+                        messages = saved
+                    )
+                }
+                addLog(LogLevel.INFO, TAG, "Resumed ${pendingGM.title} chat (${saved.size} messages)")
+            } else if (pendingCustom != null) {
+                val saved = settingsRepository.loadChatHistory(pendingCustom.chatHistoryKey)
+                _uiState.update {
+                    it.copy(
+                        activeGrandMaster = null,
+                        activeCustomGrandMaster = pendingCustom,
+                        showResumeOrResetDialog = false,
+                        showGrandMasterPicker = false,
+                        pendingCustomGrandMaster = null,
+                        messages = saved
+                    )
+                }
+                addLog(LogLevel.INFO, TAG, "Resumed custom ${pendingCustom.title} chat (${saved.size} messages)")
+            }
+        }
+    }
+
+    /** Reset and start fresh for the pending Grand Master */
+    fun resetGrandMasterChat() {
+        val pendingGM = _uiState.value.pendingGrandMaster
+        val pendingCustom = _uiState.value.pendingCustomGrandMaster
+        viewModelScope.launch(Dispatchers.IO) {
+            if (pendingGM != null) {
+                settingsRepository.clearChatHistory("gm_${pendingGM.name}")
+                activateGrandMasterFresh(pendingGM)
+            } else if (pendingCustom != null) {
+                settingsRepository.clearChatHistory(pendingCustom.chatHistoryKey)
+                activateCustomGrandMasterFresh(pendingCustom)
+            }
+        }
+    }
+
+    fun dismissResumeOrResetDialog() {
+        _uiState.update {
+            it.copy(showResumeOrResetDialog = false, pendingGrandMaster = null, pendingCustomGrandMaster = null)
+        }
+    }
+
+    private fun activateGrandMasterFresh(grandMaster: GrandMaster) {
         _uiState.update {
             it.copy(
                 activeGrandMaster = grandMaster,
+                activeCustomGrandMaster = null,
                 showGrandMasterPicker = false,
+                showResumeOrResetDialog = false,
+                pendingGrandMaster = null,
                 messages = listOf(
                     Message(text = grandMaster.welcomeMessage, user = User.AI)
                 )
@@ -455,9 +559,117 @@ class ChatViewModel(
         addLog(LogLevel.INFO, TAG, "Activated Grand Master: ${grandMaster.title}")
     }
 
+    private fun activateCustomGrandMasterFresh(custom: CustomGrandMaster) {
+        val welcome = custom.welcomeMessage.ifBlank { "Hello! I'm your ${custom.title}. How can I help you today?" }
+        _uiState.update {
+            it.copy(
+                activeGrandMaster = null,
+                activeCustomGrandMaster = custom,
+                showGrandMasterPicker = false,
+                showResumeOrResetDialog = false,
+                pendingCustomGrandMaster = null,
+                messages = listOf(
+                    Message(text = welcome, user = User.AI)
+                )
+            )
+        }
+        addLog(LogLevel.INFO, TAG, "Activated custom Grand Master: ${custom.title}")
+    }
+
     fun exitGrandMaster() {
-        _uiState.update { it.copy(activeGrandMaster = null, messages = emptyList()) }
+        // Save chat before exiting
+        saveCurrentGrandMasterChat()
+        _uiState.update {
+            it.copy(activeGrandMaster = null, activeCustomGrandMaster = null, messages = emptyList())
+        }
         addLog(LogLevel.INFO, TAG, "Exited Grand Master mode")
+    }
+
+    /** Save current Grand Master chat to persistence */
+    private fun saveCurrentGrandMasterChat() {
+        val state = _uiState.value
+        val messages = state.messages
+        if (messages.isEmpty()) return
+
+        val key = when {
+            state.activeGrandMaster != null -> "gm_${state.activeGrandMaster.name}"
+            state.activeCustomGrandMaster != null -> state.activeCustomGrandMaster.chatHistoryKey
+            else -> return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            settingsRepository.saveChatHistory(key, messages)
+        }
+    }
+
+    // ==================== CUSTOM GRAND MASTER ====================
+
+    fun showCreateGrandMaster() {
+        _uiState.update { it.copy(showCreateGrandMaster = true) }
+    }
+
+    fun hideCreateGrandMaster() {
+        _uiState.update { it.copy(showCreateGrandMaster = false) }
+    }
+
+    fun createCustomGrandMaster(
+        icon: String,
+        title: String,
+        subtitle: String,
+        description: String,
+        systemPrompt: String,
+        welcomeMessage: String
+    ) {
+        if (title.isBlank() || systemPrompt.isBlank()) return
+        val custom = CustomGrandMaster(
+            icon = icon.ifBlank { "\uD83C\uDF1F" },
+            title = title.trim(),
+            subtitle = subtitle.trim(),
+            description = description.trim(),
+            systemPrompt = systemPrompt.trim(),
+            welcomeMessage = welcomeMessage.trim()
+        )
+        _uiState.update {
+            it.copy(
+                customGrandMasters = it.customGrandMasters + custom,
+                showCreateGrandMaster = false
+            )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            settingsRepository.saveCustomGrandMasters(_uiState.value.customGrandMasters)
+        }
+        addLog(LogLevel.INFO, TAG, "Created custom Grand Master: ${custom.title}")
+    }
+
+    /** Parse JSON text to create a custom Grand Master */
+    fun createCustomGrandMasterFromJson(jsonText: String) {
+        try {
+            val obj = JSONObject(jsonText)
+            createCustomGrandMaster(
+                icon = obj.optString("icon", "\uD83C\uDF1F"),
+                title = obj.getString("title"),
+                subtitle = obj.optString("subtitle", ""),
+                description = obj.optString("description", ""),
+                systemPrompt = obj.getString("systemPrompt"),
+                welcomeMessage = obj.optString("welcomeMessage", "")
+            )
+        } catch (e: Exception) {
+            addLog(LogLevel.ERROR, TAG, "Invalid JSON for Grand Master: ${e.message}")
+            _uiState.update { it.copy(apiKeyTestResult = "Invalid JSON: ${e.message?.take(80)}") }
+        }
+    }
+
+    fun deleteCustomGrandMaster(id: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val custom = _uiState.value.customGrandMasters.find { it.id == id }
+            if (custom != null) {
+                settingsRepository.clearChatHistory(custom.chatHistoryKey)
+            }
+            _uiState.update {
+                it.copy(customGrandMasters = it.customGrandMasters.filter { gm -> gm.id != id })
+            }
+            settingsRepository.saveCustomGrandMasters(_uiState.value.customGrandMasters)
+            addLog(LogLevel.INFO, TAG, "Deleted custom Grand Master: ${custom?.title}")
+        }
     }
 
     // ==================== LOGGING ====================
@@ -579,8 +791,9 @@ class ChatViewModel(
                 }
 
                 // Prepend Grand Master context + conversation history for offline
-                val grandMaster = _uiState.value.activeGrandMaster
-                val fullPrompt = if (grandMaster != null) {
+                val systemPrompt = _uiState.value.activeGrandMaster?.systemPrompt
+                    ?: _uiState.value.activeCustomGrandMaster?.systemPrompt
+                val fullPrompt = if (systemPrompt != null) {
                     val recentMessages = _uiState.value.messages
                         .drop(1) // skip welcome message
                         .takeLast(6) // keep last 3 exchanges to fit in context
@@ -590,7 +803,7 @@ class ChatViewModel(
                             if (msg.user is User.Person) "User: ${msg.text}" else "Assistant: ${msg.text}"
                         } + "\n"
                     } else ""
-                    "${grandMaster.systemPrompt}\n\n${historyText}User: $prompt\nAssistant:"
+                    "$systemPrompt\n\n${historyText}User: $prompt\nAssistant:"
                 } else prompt
 
                 val response = inference.generateResponse(fullPrompt)
@@ -651,15 +864,19 @@ class ChatViewModel(
                 val contents = mutableListOf<GeminiContent>()
 
                 // Inject Grand Master system prompt as first user-model exchange
-                val grandMaster = _uiState.value.activeGrandMaster
-                if (grandMaster != null) {
-                    contents.add(GeminiContent(role = "user", parts = listOf(GeminiPart(text = "System instruction: ${grandMaster.systemPrompt}"))))
-                    contents.add(GeminiContent(role = "model", parts = listOf(GeminiPart(text = "Understood. I will act as the ${grandMaster.title} as instructed."))))
+                val gmSystemPrompt = _uiState.value.activeGrandMaster?.systemPrompt
+                    ?: _uiState.value.activeCustomGrandMaster?.systemPrompt
+                val gmTitle = _uiState.value.activeGrandMaster?.title
+                    ?: _uiState.value.activeCustomGrandMaster?.title
+                if (gmSystemPrompt != null) {
+                    contents.add(GeminiContent(role = "user", parts = listOf(GeminiPart(text = "System instruction: $gmSystemPrompt"))))
+                    contents.add(GeminiContent(role = "model", parts = listOf(GeminiPart(text = "Understood. I will act as the $gmTitle as instructed."))))
                 }
 
                 val prevMessages = _uiState.value.messages.dropLast(1)
                 // Skip the welcome message (first AI message from Grand Master)
-                val messagesToSend = if (grandMaster != null && prevMessages.isNotEmpty()) prevMessages.drop(1) else prevMessages
+                val isGrandMasterActive = gmSystemPrompt != null
+                val messagesToSend = if (isGrandMasterActive && prevMessages.isNotEmpty()) prevMessages.drop(1) else prevMessages
                 for (msg in messagesToSend) {
                     if (msg.imageUri == null) {
                         contents.add(
@@ -791,12 +1008,14 @@ class ChatViewModel(
 
     private fun appendAiMessage(text: String) {
         _uiState.update { it.copy(messages = it.messages + Message(text = text, user = User.AI)) }
+        saveCurrentGrandMasterChat()
     }
 
     private fun appendAiMessageWithImages(text: String, images: List<GeneratedImage>) {
         _uiState.update {
             it.copy(messages = it.messages + Message(text = text, user = User.AI, generatedImages = images))
         }
+        saveCurrentGrandMasterChat()
     }
 
     fun saveGeneratedImage(image: GeneratedImage): String? {
@@ -847,7 +1066,19 @@ class ChatViewModel(
     }
 
     fun clearChat() {
-        _uiState.update { it.copy(messages = emptyList(), pendingImageUri = null, activeGrandMaster = null) }
+        // Clear saved chat for current Grand Master
+        val state = _uiState.value
+        val key = when {
+            state.activeGrandMaster != null -> "gm_${state.activeGrandMaster.name}"
+            state.activeCustomGrandMaster != null -> state.activeCustomGrandMaster.chatHistoryKey
+            else -> null
+        }
+        if (key != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                settingsRepository.clearChatHistory(key)
+            }
+        }
+        _uiState.update { it.copy(messages = emptyList(), pendingImageUri = null, activeGrandMaster = null, activeCustomGrandMaster = null) }
         addLog(LogLevel.INFO, TAG, "Chat cleared")
     }
 

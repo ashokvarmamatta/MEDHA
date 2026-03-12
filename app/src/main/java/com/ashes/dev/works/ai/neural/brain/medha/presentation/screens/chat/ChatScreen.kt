@@ -41,6 +41,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -51,10 +52,12 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -63,6 +66,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
@@ -91,6 +95,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.AppMode
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.ChatState
+import com.ashes.dev.works.ai.neural.brain.medha.domain.model.CustomGrandMaster
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.GrandMaster
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.Message
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.ModelStatus
@@ -170,8 +175,34 @@ fun ChatScreen(
     if (uiState.showGrandMasterPicker) {
         GrandMasterPickerSheet(
             onDismiss = { viewModel.hideGrandMasterPicker() },
-            onSelect = { grandMaster -> viewModel.activateGrandMaster(grandMaster) },
-            activeGrandMaster = uiState.activeGrandMaster
+            onSelect = { grandMaster -> viewModel.requestActivateGrandMaster(grandMaster) },
+            onSelectCustom = { custom -> viewModel.requestActivateCustomGrandMaster(custom) },
+            onCreateNew = { viewModel.hideGrandMasterPicker(); viewModel.showCreateGrandMaster() },
+            onDeleteCustom = { id -> viewModel.deleteCustomGrandMaster(id) },
+            activeGrandMaster = uiState.activeGrandMaster,
+            activeCustomGrandMaster = uiState.activeCustomGrandMaster,
+            customGrandMasters = uiState.customGrandMasters
+        )
+    }
+
+    // Resume or Reset dialog
+    if (uiState.showResumeOrResetDialog) {
+        ResumeOrResetDialog(
+            title = uiState.pendingGrandMaster?.title ?: uiState.pendingCustomGrandMaster?.title ?: "Grand Master",
+            onResume = { viewModel.resumeGrandMasterChat() },
+            onReset = { viewModel.resetGrandMasterChat() },
+            onDismiss = { viewModel.dismissResumeOrResetDialog() }
+        )
+    }
+
+    // Create custom Grand Master
+    if (uiState.showCreateGrandMaster) {
+        CreateGrandMasterSheet(
+            onDismiss = { viewModel.hideCreateGrandMaster() },
+            onCreate = { icon, title, subtitle, desc, prompt, welcome ->
+                viewModel.createCustomGrandMaster(icon, title, subtitle, desc, prompt, welcome)
+            },
+            onCreateFromJson = { json -> viewModel.createCustomGrandMasterFromJson(json) }
         )
     }
 
@@ -182,7 +213,7 @@ fun ChatScreen(
                 TopAppBar(
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                     navigationIcon = {
-                        if (uiState.activeGrandMaster != null) {
+                        if (uiState.activeGrandMaster != null || uiState.activeCustomGrandMaster != null) {
                             IconButton(onClick = { viewModel.exitGrandMaster() }) {
                                 Icon(Icons.AutoMirrored.Filled.ArrowBack, "Exit Grand Master", tint = MaterialTheme.colorScheme.onSurface)
                             }
@@ -194,9 +225,13 @@ fun ChatScreen(
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
+                                    val gmActive = uiState.activeGrandMaster != null || uiState.activeCustomGrandMaster != null
+                                    val gmDisplayTitle = uiState.activeGrandMaster?.let { "${it.icon} ${it.title}" }
+                                        ?: uiState.activeCustomGrandMaster?.let { "${it.icon} ${it.title}" }
+                                        ?: "MEDHA"
                                     Text(
-                                        if (uiState.activeGrandMaster != null) "${uiState.activeGrandMaster!!.icon} ${uiState.activeGrandMaster!!.title}" else "MEDHA",
-                                        style = if (uiState.activeGrandMaster != null) MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold) else MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = 2.sp),
+                                        gmDisplayTitle,
+                                        style = if (gmActive) MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold) else MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = 2.sp),
                                         color = MaterialTheme.colorScheme.primary
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
@@ -223,7 +258,7 @@ fun ChatScreen(
                     },
                     actions = {
                         // Grand Master picker button (only when not in a Grand Master session)
-                        if (uiState.activeGrandMaster == null && uiState.modelStatus is ModelStatus.Ready) {
+                        if (uiState.activeGrandMaster == null && uiState.activeCustomGrandMaster == null && uiState.modelStatus is ModelStatus.Ready) {
                             IconButton(onClick = { viewModel.showGrandMasterPicker() }) {
                                 Text("\uD83C\uDFC6", fontSize = 20.sp) // trophy icon
                             }
@@ -275,7 +310,7 @@ fun ChatScreen(
                     onRetry = { viewModel.initializeEngine() },
                     onViewLogs = onNavigateToLogs,
                     onOpenSettings = onNavigateToSettings,
-                    onSelectGrandMaster = { viewModel.activateGrandMaster(it) }
+                    onSelectGrandMaster = { viewModel.requestActivateGrandMaster(it) }
                 )
             } else {
                 LazyColumn(
@@ -288,7 +323,7 @@ fun ChatScreen(
                             visible = true,
                             enter = fadeIn(tween(300)) + slideInVertically(initialOffsetY = { it / 2 }, animationSpec = tween(300))
                         ) {
-                            MessageBubble(message = message, viewModel = viewModel, aiName = uiState.activeGrandMaster?.title ?: "Medha")
+                            MessageBubble(message = message, viewModel = viewModel, aiName = uiState.activeGrandMaster?.title ?: uiState.activeCustomGrandMaster?.title ?: "Medha")
                         }
                     }
                     if (uiState.isGenerating) {
@@ -484,7 +519,12 @@ private fun ImageResponseStyleSheet(
 private fun GrandMasterPickerSheet(
     onDismiss: () -> Unit,
     onSelect: (GrandMaster) -> Unit,
-    activeGrandMaster: GrandMaster?
+    onSelectCustom: (CustomGrandMaster) -> Unit,
+    onCreateNew: () -> Unit,
+    onDeleteCustom: (String) -> Unit,
+    activeGrandMaster: GrandMaster?,
+    activeCustomGrandMaster: CustomGrandMaster?,
+    customGrandMasters: List<CustomGrandMaster>
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -509,63 +549,416 @@ private fun GrandMasterPickerSheet(
             )
             Spacer(modifier = Modifier.height(16.dp))
 
-            GrandMaster.entries.forEach { gm ->
-                val isActive = gm == activeGrandMaster
-                Surface(
-                    onClick = { if (!isActive) onSelect(gm) },
-                    shape = RoundedCornerShape(16.dp),
-                    color = if (isActive)
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-                    else
-                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                    border = if (isActive) BorderStroke(
-                        2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                    ) else null,
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
+            LazyColumn(modifier = Modifier.weight(1f, fill = false)) {
+                // Built-in Grand Masters
+                item {
+                    Text(
+                        "Built-in",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentGold,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                }
+                items(GrandMaster.entries.toList()) { gm ->
+                    val isActive = gm == activeGrandMaster
+                    GrandMasterCard(
+                        icon = gm.icon,
+                        title = gm.title,
+                        subtitle = gm.subtitle,
+                        description = gm.description,
+                        isActive = isActive,
+                        onClick = { if (!isActive) onSelect(gm) }
+                    )
+                }
+
+                // Custom Grand Masters
+                if (customGrandMasters.isNotEmpty()) {
+                    item {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            "Your Grand Masters",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = AccentCyan,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+                    }
+                    items(customGrandMasters, key = { it.id }) { custom ->
+                        val isActive = custom.id == activeCustomGrandMaster?.id
+                        GrandMasterCard(
+                            icon = custom.icon,
+                            title = custom.title,
+                            subtitle = custom.subtitle,
+                            description = custom.description,
+                            isActive = isActive,
+                            isCustom = true,
+                            onClick = { if (!isActive) onSelectCustom(custom) },
+                            onDelete = { onDeleteCustom(custom.id) }
+                        )
+                    }
+                }
+
+                // Create new button
+                item {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Surface(
+                        onClick = onCreateNew,
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(gm.icon, fontSize = 32.sp)
-                        Spacer(modifier = Modifier.width(14.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    gm.title,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                if (isActive) {
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Surface(
-                                        shape = RoundedCornerShape(4.dp),
-                                        color = StatusSuccess.copy(alpha = 0.15f)
-                                    ) {
-                                        Text(
-                                            "ACTIVE",
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
-                                            color = StatusSuccess
-                                        )
-                                    }
-                                }
-                            }
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Text("+", fontSize = 24.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                gm.subtitle,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                gm.description,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                "Create Your Grand Master",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
                             )
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GrandMasterCard(
+    icon: String,
+    title: String,
+    subtitle: String,
+    description: String,
+    isActive: Boolean,
+    isCustom: Boolean = false,
+    onClick: () -> Unit,
+    onDelete: (() -> Unit)? = null
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(16.dp),
+        color = if (isActive)
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+        else
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+        border = if (isActive) BorderStroke(
+            2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+        ) else null,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(icon, fontSize = 32.sp)
+            Spacer(modifier = Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    if (isActive) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = StatusSuccess.copy(alpha = 0.15f)
+                        ) {
+                            Text(
+                                "ACTIVE",
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                                color = StatusSuccess
+                            )
+                        }
+                    }
+                    if (isCustom) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = AccentCyan.copy(alpha = 0.15f)
+                        ) {
+                            Text(
+                                "CUSTOM",
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                                color = AccentCyan
+                            )
+                        }
+                    }
+                }
+                if (subtitle.isNotBlank()) {
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                    )
+                }
+                if (description.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    )
+                }
+            }
+            if (onDelete != null && !isActive) {
+                IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.Delete, "Delete", modifier = Modifier.size(18.dp), tint = StatusError.copy(alpha = 0.6f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResumeOrResetDialog(
+    title: String,
+    onResume: () -> Unit,
+    onReset: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, fontWeight = FontWeight.Bold) },
+        text = {
+            Text("You have a previous chat session with this Grand Master. Would you like to continue where you left off or start fresh?")
+        },
+        confirmButton = {
+            TextButton(onClick = onResume) {
+                Text("Continue Chat", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onReset) {
+                Text("Start Fresh", color = StatusWarning)
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(20.dp)
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CreateGrandMasterSheet(
+    onDismiss: () -> Unit,
+    onCreate: (icon: String, title: String, subtitle: String, description: String, systemPrompt: String, welcomeMessage: String) -> Unit,
+    onCreateFromJson: (String) -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var useJsonMode by remember { mutableStateOf(false) }
+
+    // Form fields
+    var icon by remember { mutableStateOf("") }
+    var title by remember { mutableStateOf("") }
+    var subtitle by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
+    var systemPrompt by remember { mutableStateOf("") }
+    var welcomeMessage by remember { mutableStateOf("") }
+    var jsonText by remember { mutableStateOf("") }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
+            Text(
+                "Create Grand Master",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "Define your own AI expert with custom rules and personality",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Toggle between form and JSON mode
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Surface(
+                    onClick = { useJsonMode = false },
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (!useJsonMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+                ) {
+                    Text(
+                        "Form",
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        color = if (!useJsonMode) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Surface(
+                    onClick = { useJsonMode = true },
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (useJsonMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+                ) {
+                    Text(
+                        "JSON",
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        color = if (useJsonMode) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            if (useJsonMode) {
+                Text(
+                    "Paste your Grand Master JSON configuration:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // JSON example hint
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        "{\n  \"icon\": \"\uD83C\uDF1F\",\n  \"title\": \"My Expert\",\n  \"subtitle\": \"Expert in ...\",\n  \"description\": \"Short description\",\n  \"systemPrompt\": \"You are an expert in...\",\n  \"welcomeMessage\": \"Hello! I'm your...\"\n}",
+                        modifier = Modifier.padding(12.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = jsonText,
+                    onValueChange = { jsonText = it },
+                    modifier = Modifier.fillMaxWidth().height(200.dp),
+                    placeholder = { Text("Paste JSON here...") },
+                    textStyle = MaterialTheme.typography.bodySmall,
+                    maxLines = 15,
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Surface(
+                    onClick = { if (jsonText.isNotBlank()) onCreateFromJson(jsonText) },
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (jsonText.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        "Create from JSON",
+                        modifier = Modifier.padding(14.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = if (jsonText.isNotBlank()) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                    )
+                }
+            } else {
+                // Form mode
+                OutlinedTextField(
+                    value = icon,
+                    onValueChange = { icon = it },
+                    label = { Text("Icon (emoji)") },
+                    placeholder = { Text("e.g. \uD83C\uDF1F \uD83E\uDD16 \uD83C\uDFA8") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Title *") },
+                    placeholder = { Text("e.g. Fitness Coach") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = subtitle,
+                    onValueChange = { subtitle = it },
+                    label = { Text("Subtitle") },
+                    placeholder = { Text("e.g. Personal Training Expert") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Description") },
+                    placeholder = { Text("Short description of expertise") },
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 2,
+                    shape = RoundedCornerShape(12.dp)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = systemPrompt,
+                    onValueChange = { systemPrompt = it },
+                    label = { Text("System Prompt / Rules *") },
+                    placeholder = { Text("Define how this Grand Master should behave, what rules to follow, expertise areas, tone, restrictions...") },
+                    modifier = Modifier.fillMaxWidth().height(150.dp),
+                    maxLines = 10,
+                    shape = RoundedCornerShape(12.dp)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = welcomeMessage,
+                    onValueChange = { welcomeMessage = it },
+                    label = { Text("Welcome Message") },
+                    placeholder = { Text("First message shown when user starts a session") },
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 3,
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+                val canCreate = title.isNotBlank() && systemPrompt.isNotBlank()
+                Surface(
+                    onClick = { if (canCreate) onCreate(icon, title, subtitle, description, systemPrompt, welcomeMessage) },
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (canCreate) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        "Create Grand Master",
+                        modifier = Modifier.padding(14.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = if (canCreate) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                    )
                 }
             }
         }

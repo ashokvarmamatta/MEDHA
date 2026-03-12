@@ -1,8 +1,8 @@
 <div align="center">
 
-# 🧠 MEDHA — AI Chat for Android
+# MEDHA — On-Device AI Chat for Android
 
-**A premium dual-mode AI chat app — run AI offline on your device with MediaPipe + Gemma, or connect to Google Gemini cloud API. Image analysis, prompt templates, and a stunning Material 3 UI.**
+**Privacy-first AI chat that runs entirely on your phone. No internet, no data collection, no servers. Powered by MediaPipe + Gemma for true offline intelligence — with optional Gemini cloud API for enhanced capabilities.**
 
 [![Android](https://img.shields.io/badge/Platform-Android%2024%2B-green?logo=android)](https://developer.android.com)
 [![Kotlin](https://img.shields.io/badge/Language-Kotlin-purple?logo=kotlin)](https://kotlinlang.org)
@@ -15,138 +15,183 @@
 
 ---
 
-## 📖 What is MEDHA?
+## What is MEDHA?
 
-MEDHA (**M**obile **E**dge **D**evice **H**ybrid **A**I) is an Android-native AI chat application that gives you **two ways to talk to AI** — completely offline using on-device inference, or online through Google's Gemini cloud API. No subscriptions, no data collection, no server required for offline mode.
+MEDHA (**M**obile **E**dge **D**evice **H**ybrid **A**I) is an Android AI chat app built for **offline-first** usage. Your prompts never leave your phone — the Gemma model runs entirely on-device via MediaPipe GenAI Tasks.
+
+For users who want faster, more capable responses, MEDHA also offers an **optional online mode** via Google Gemini API — with multi-key failover, image analysis, and image generation.
 
 ```
-You → Type a message / Upload an image
-         ↓
-   ┌─────────────────────────────┐
-   │     MEDHA App (Android)     │
-   │                             │
-   │  ┌─────────┐ ┌───────────┐ │
-   │  │ Offline  │ │  Online   │ │
-   │  │ MediaPipe│ │ Gemini API│ │
-   │  │ Gemma 2B │ │ 2.0-flash │ │
-   │  └────┬─────┘ └─────┬─────┘ │
-   │       └──────┬───────┘       │
-   └──────────────┼───────────────┘
-                  ↓
+You -> Type a message / Upload an image
+         |
+   +-----------------------------+
+   |     MEDHA App (Android)     |
+   |                             |
+   |  +--- PRIMARY -----------+  |
+   |  | Offline (On-Device)   |  |
+   |  | MediaPipe + Gemma 2B  |  |
+   |  | Zero internet needed  |  |
+   |  +-----------------------+  |
+   |                             |
+   |  +--- SECONDARY ---------+  |
+   |  | Online (Cloud API)    |  |
+   |  | Gemini API + Images   |  |
+   |  | Requires API key      |  |
+   |  +-----------------------+  |
+   +-----------------------------+
+                  |
         AI Response in Chat
 ```
 
-**Offline mode** — Your prompt never leaves your phone. The Gemma 2B model runs entirely on-device via MediaPipe GenAI Tasks.
+---
 
-**Online mode** — Send prompts (and images) to Google Gemini 2.0 Flash via REST API for faster, more capable responses.
+## Core Features
+
+### Offline AI Chat (Primary)
+- **On-device LLM** — Gemma 2B runs via MediaPipe GenAI Tasks. Your data stays on your phone
+- **Zero internet required** — Works in airplane mode, no server, no cloud
+- **Private by design** — No data collection, no telemetry, no accounts
+- Auto-scans Downloads folder for `.bin` model files
+- Conversation history preserved within Grand Master sessions
+
+### Online AI Chat (Secondary)
+- **Google Gemini API** — Connect for faster, more capable responses when needed
+- **Multi-API key management** — Add multiple keys with labels, validation, and automatic failover
+- **Image analysis** — Upload images for AI-powered description, OCR, and analysis
+- **Image generation** — AI-generated images with save-to-gallery
+- **Model selection** — Browse and pick from available Gemini models
+- Switch between offline and online seamlessly from Settings
 
 ---
 
-## ✨ Features
+## Grand Master Mode
 
-### 🤖 Dual-Mode AI Chat
-- **Offline Mode** — On-device LLM inference using MediaPipe GenAI + Gemma 2B model. Zero internet required
-- **Online Mode** — Google Gemini API (gemini-2.0-flash) for powerful cloud responses
-- Switch between modes seamlessly from the Settings screen
-- Real-time model status indicators (Initializing → Ready → Error)
+Grand Masters are **specialized AI personas** with deep expertise in specific domains. When you activate a Grand Master, the AI adopts that persona's knowledge, rules, and communication style — making conversations feel like talking to a real expert, not a generic chatbot.
 
-### 🖼️ Image Analysis
-- **Upload images** from gallery using Android Photo Picker
-- **AI-powered image analysis** — describe, analyze, and extract insights from any image
-- **OCR** — extract and transcribe text from images
-- **Art style analysis** — identify artistic techniques, colors, and composition
-- Inline image previews in chat bubbles via Coil
+### Built-in Grand Masters
 
-### 📋 22 Pre-built Prompt Templates
-One-tap prompt templates organized across 6 categories:
+| Grand Master | Expertise |
+|---|---|
+| **Chess Grand Master** | Opening theory, tactics, endgames, positional play, game analysis |
+| **Health Grand Master** | Fitness, nutrition, mental health, wellness (with medical disclaimers) |
+| **Code Grand Master** | Multi-language programming, architecture, debugging, DevOps |
+| **Career Grand Master** | Career planning, interview prep, salary negotiation, personalized roadmaps |
+
+### Create Your Own Grand Master
+
+You can **create custom Grand Masters** with your own rules, personality, and expertise:
+
+**Form mode** — Fill in the fields (title, system prompt, welcome message, etc.)
+
+**JSON mode** — Paste a JSON configuration for quick setup:
+
+```json
+{
+  "icon": "🎯",
+  "title": "Marketing Guru",
+  "subtitle": "Digital Marketing Strategist",
+  "description": "SEO, social media, content strategy, analytics",
+  "systemPrompt": "You are a world-class digital marketing strategist with 15 years of experience. Your expertise includes SEO, content marketing, social media strategy, paid advertising, email marketing, and analytics. Always provide data-driven advice with specific, actionable steps. When discussing strategies, include estimated timelines and KPIs. Never give vague advice — be specific about tools, platforms, and metrics.",
+  "welcomeMessage": "Welcome! I'm your Marketing Guru. Tell me about your business or product, and I'll craft a tailored marketing strategy for you."
+}
+```
+
+The `systemPrompt` is the most important field — it defines **exactly how the Grand Master behaves**, what rules it follows, what expertise it has, and how it responds.
+
+### Chat Persistence
+
+- When you exit a Grand Master session, your **chat is automatically saved**
+- Next time you open the same Grand Master, you'll be asked: **Continue previous chat** or **Start fresh**
+- Chat history is stored locally on your device
+- Use the **Reset** button to clear saved chat and begin a new session
+
+---
+
+## Prompt Templates
+
+22 one-tap prompt templates across 6 categories:
 
 | Category | Templates |
 |---|---|
-| 📊 **Analysis** | Summarize Text, Explain Simply (ELI5), Pros & Cons, Key Takeaways |
-| ✍️ **Writing** | Write Email, Fix Grammar, Translate, Rewrite Formal |
-| 💻 **Code** | Explain Code, Debug Code, Refactor Code, Write Code |
-| 🎨 **Creative** | Brainstorm Ideas, Write Story, Write Poem |
-| 🔧 **Utility** | Compare, Make Plan, Quiz Me, Make List |
-| 🖼️ **Image** | Analyze Image, Extract Text from Image, Describe Art Style |
+| **Analysis** | Summarize Text, Explain Simply (ELI5), Pros & Cons, Key Takeaways |
+| **Writing** | Write Email, Fix Grammar, Translate, Rewrite Formal |
+| **Code** | Explain Code, Debug Code, Refactor Code, Write Code |
+| **Creative** | Brainstorm Ideas, Write Story, Write Poem |
+| **Utility** | Compare, Make Plan, Quiz Me, Make List |
+| **Image** | Analyze Image, Extract Text from Image, Describe Art Style *(online only)* |
 
-### 🎨 Premium UI
+---
+
+## UI & Design
+
 - Custom **Material 3 dark/light theme** with premium color palette
-- Animated status dots, smooth screen transitions, gradient accents
-- Chat bubbles with timestamps and image previews
-- **Welcome screen** with mode-specific setup guides
+- Animated status dots, smooth transitions, gradient accents
+- Chat bubbles with timestamps, image previews, and AI-generated image display
+- **Welcome screen** with Grand Master quick-access cards
+- Grand Master picker bottom sheet with create/delete/resume
 - Edge-to-edge display with proper system bar handling
-- Bottom sheet for prompt template selection
 
-### 📱 Additional Screens
-- **⚙️ Settings** — Mode toggle (Online/Offline), API key input with show/hide, offline model picker with rescan
-- **📋 Logs** — Real-time engine log viewer with color-coded severity levels (DEBUG, INFO, WARNING, ERROR)
-- **ℹ️ About** — Full app guide, feature list, setup instructions, tips, limitations, and privacy info
+### Screens
 
----
-
-## 📸 Screens
-
-| Chat | Settings | Logs | About |
-|------|----------|------|-------|
-| Main chat with image upload, templates, mode badge | Mode selection, API key, model picker | Color-coded real-time logs | App guide & documentation |
+| Screen | Purpose |
+|--------|---------|
+| **Chat** | Main conversation with input bar, image picker, templates, Grand Master header |
+| **Settings** | Mode toggle, API key management with test/validate, model picker, status panel |
+| **Logs** | Real-time engine log viewer with color-coded severity levels |
+| **About** | App guide, feature list, setup instructions, privacy info |
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
-MEDHA follows **MVVM (Model-View-ViewModel)** architecture with **Koin** dependency injection.
+MEDHA follows **MVVM** architecture with **Koin** dependency injection.
 
 ```
 app/src/main/java/com/ashes/dev/works/ai/neural/brain/medha/
-│
-├── MainActivity.kt                          # Entry point — edge-to-edge, nav host
-├── MedhaApplication.kt                      # Koin initialization
-│
-├── data/
-│   └── remote/
-│       └── GeminiApi.kt                     # Retrofit interface + Gemini request/response models
-│                                            #   (GeminiRequest, GeminiPart, InlineData for images)
-│
-├── di/
-│   └── AppModule.kt                         # Koin DI module — ViewModel provider
-│
-├── domain/
-│   └── model/
-│       ├── AppMode.kt                       # Sealed class: Offline | Online
-│       ├── ChatState.kt                     # Full UI state holder
-│       ├── LogEntry.kt                      # Log entry data class + LogLevel enum
-│       ├── Message.kt                       # Chat message with UUID, imageUri support
-│       ├── ModelInfo.kt                     # Offline model file metadata + display name
-│       ├── ModelStatus.kt                   # Sealed class: Idle → Initializing → Ready → Error
-│       ├── PromptTemplate.kt                # 22 templates + TemplateCategory enum
-│       └── User.kt                          # User enum (Human / AI)
-│
-├── presentation/
-│   ├── navigation/
-│   │   └── NavGraph.kt                      # 4 routes with animated slide transitions
-│   │
-│   └── screens/
-│       ├── about/
-│       │   └── AboutScreen.kt               # App guide, features, setup docs, privacy
-│       ├── chat/
-│       │   ├── ChatScreen.kt                # Main chat UI — input bar, image picker,
-│       │   │                                #   template sheet, welcome screen, bubbles
-│       │   └── ChatViewModel.kt             # Dual-mode logic — offline (MediaPipe) +
-│       │                                    #   online (Gemini API), image encoding, model scan
-│       ├── logs/
-│       │   └── LogsScreen.kt                # Real-time log viewer, auto-scroll, timestamps
-│       └── settings/
-│           └── SettingsScreen.kt            # Mode radio, API key, model picker, status panel
-│
-└── ui/theme/
-    ├── Color.kt                             # Premium palette — accents, gradients, chat colors
-    ├── Theme.kt                             # Dark/light Material 3 color schemes
-    └── Type.kt                              # Full 12-style typography system
+|
++-- MainActivity.kt                          # Entry point
++-- MedhaApplication.kt                      # Koin initialization
+|
++-- data/
+|   +-- remote/
+|   |   +-- GeminiApi.kt                     # Retrofit interface + Gemini models
+|   +-- repository/
+|       +-- SettingsRepository.kt            # DataStore persistence (keys, chat history, custom GMs)
+|
++-- di/
+|   +-- AppModule.kt                         # Koin DI module
+|
++-- domain/model/
+|   +-- AppMode.kt                           # Sealed class: Offline | Online
+|   +-- ChatState.kt                         # Full UI state holder
+|   +-- Message.kt                           # Chat message with UUID, imageUri
+|   +-- GrandMaster.kt                       # Built-in Grand Master enum (4 experts)
+|   +-- CustomGrandMaster.kt                 # User-created Grand Master data class
+|   +-- ApiKeyEntry.kt                       # API key with validation state
+|   +-- ModelInfo.kt                         # Offline model file metadata
+|   +-- ModelStatus.kt                       # Sealed: Idle -> Initializing -> Ready -> Error
+|   +-- PromptTemplate.kt                    # 22 templates + categories
+|   +-- LogEntry.kt, User.kt
+|
++-- presentation/
+|   +-- navigation/
+|   |   +-- NavGraph.kt                      # 4 routes with animated transitions
+|   +-- screens/
+|       +-- chat/
+|       |   +-- ChatScreen.kt                # Chat UI, Grand Master picker, create GM sheet
+|       |   +-- ChatViewModel.kt             # Dual-mode logic, GM management, chat persistence
+|       +-- settings/
+|       |   +-- SettingsScreen.kt            # API keys, model selection, mode toggle
+|       +-- about/AboutScreen.kt
+|       +-- logs/LogsScreen.kt
+|
++-- ui/theme/
+    +-- Color.kt, Theme.kt, Type.kt
 ```
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 - Android Studio Ladybug or newer
@@ -162,21 +207,20 @@ app/src/main/java/com/ashes/dev/works/ai/neural/brain/medha/
 git clone https://github.com/ashokvarmamatta/MEDHA.git
 cd MEDHA
 
-# 2. Open in Android Studio
-#    File → Open → select the MEDHA folder
+# 2. Open in Android Studio — File -> Open -> select the MEDHA folder
 
 # 3. Wait for Gradle sync to complete
 
 # 4. Connect your Android device (USB debugging ON) or start an emulator
 
-# 5. Click ▶ Run
+# 5. Click Run
 ```
 
 ---
 
-## ⚙️ Setup Guide
+## Setup Guide
 
-### 🔌 Offline Mode (No Internet Required)
+### Offline Mode (Primary — No Internet Required)
 
 1. **Download the Gemma 2B model**
    - Model file: `gemma-2b-it-gpu-int4.bin`
@@ -190,23 +234,24 @@ cd MEDHA
 
 3. **Grant storage permission** — On first launch, allow "All Files Access" when prompted
 
-4. **Select the model** — The app auto-scans your Downloads folder for `.bin` model files. If multiple are found, pick one from Settings
+4. **Select the model** — The app auto-scans your Downloads folder for `.bin` model files
 
 5. **Start chatting** — The model loads in ~10-30 seconds depending on your device
 
-### ☁️ Online Mode (Gemini API)
+### Online Mode (Secondary — Gemini API)
 
 1. **Get a free API key** from [Google AI Studio](https://aistudio.google.com/apikey)
-2. Open **MEDHA → Settings**
+2. Open **MEDHA -> Settings**
 3. Switch to **Online** mode
-4. Paste your **Gemini API key**
-5. Start chatting — responses come from Gemini 2.0 Flash
+4. Add your **Gemini API key** with an optional label
+5. **Test & validate** the key — the app will fetch available models
+6. Start chatting — responses come from Gemini API
 
-> **Tip:** Online mode also supports image analysis. Upload a photo and the AI will describe, analyze, or extract text from it.
+> **Multi-key support:** Add multiple API keys. If one key hits a rate limit, MEDHA automatically fails over to the next validated key.
 
 ---
 
-## 📦 Tech Stack
+## Tech Stack
 
 | Layer | Technology |
 |---|---|
@@ -214,12 +259,12 @@ cd MEDHA
 | **UI** | Jetpack Compose + Material Design 3 |
 | **Architecture** | MVVM + StateFlow |
 | **Offline AI** | MediaPipe GenAI Tasks (`tasks-genai:0.10.14`) — Gemma 2B |
-| **Online AI** | Google Gemini REST API (gemini-2.0-flash) |
+| **Online AI** | Google Gemini REST API |
 | **Networking** | Retrofit + OkHttp + Moshi |
 | **Image Loading** | Coil (Compose integration) |
 | **Navigation** | Jetpack Navigation Compose (animated transitions) |
 | **DI** | Koin |
-| **Storage** | Room + DataStore Preferences |
+| **Storage** | DataStore Preferences (API keys, chat history, custom GMs) |
 | **Permissions** | Accompanist Permissions |
 | **Build** | Gradle KTS + KSP |
 | **Min SDK** | 24 (Android 7.0) |
@@ -227,38 +272,35 @@ cd MEDHA
 
 ---
 
-## 🛣️ Roadmap
+## Roadmap
 
-### 🔴 High Priority
-- [ ] **Conversation persistence** — save chat history to Room database across sessions
-- [ ] **Streaming responses** — show AI response token-by-token as it generates
-- [ ] **Multiple chat sessions** — create, switch, and manage multiple conversations
-- [ ] **More online providers** — add OpenAI, Anthropic Claude, OpenRouter support
+### High Priority
+- [ ] Streaming responses — show AI response token-by-token as it generates
+- [ ] Multiple chat sessions — create, switch, and manage multiple conversations
+- [ ] More online providers — OpenAI, Anthropic Claude, OpenRouter support
 
-### 🟡 Medium Priority
-- [ ] **Voice input** — speech-to-text for hands-free prompting
-- [ ] **Export chat** — share or save conversations as text/PDF
-- [ ] **Custom system prompts** — configure the AI's persona from Settings
-- [ ] **Multi-image support** — send multiple images in a single message
-- [ ] **Camera capture** — take photos directly from the app for analysis
+### Medium Priority
+- [ ] Voice input — speech-to-text for hands-free prompting
+- [ ] Export chat — share or save conversations as text/PDF
+- [ ] Multi-image support — send multiple images in a single message
+- [ ] Camera capture — take photos directly from the app for analysis
+- [ ] Grand Master import/export — share custom Grand Masters with others
 
-### 🟢 Quality of Life
-- [ ] **Chat search** — search through message history
-- [ ] **Copy/share messages** — long-press to copy or share individual messages
-- [ ] **Notification replies** — reply to ongoing conversations from notifications
-- [ ] **Home screen widget** — quick-access chat widget
-- [ ] **Model download manager** — download Gemma models directly from the app
+### Quality of Life
+- [ ] Chat search — search through message history
+- [ ] Copy/share messages — long-press to copy or share individual messages
+- [ ] Home screen widget — quick-access chat widget
+- [ ] Model download manager — download Gemma models directly from the app
 
-### 🔵 Advanced / Future
-- [ ] **RAG (Retrieval Augmented Generation)** — chat with your documents
-- [ ] **Function calling / tool use** — let the AI interact with device features
-- [ ] **Plugin system** — extensible prompt templates and tools
-- [ ] **Tablet / foldable optimization** — adaptive layouts for large screens
-- [ ] **Wear OS companion** — quick prompts from your wrist
+### Advanced / Future
+- [ ] RAG (Retrieval Augmented Generation) — chat with your documents
+- [ ] Function calling / tool use — let the AI interact with device features
+- [ ] Plugin system — extensible prompt templates and tools
+- [ ] Tablet / foldable optimization — adaptive layouts for large screens
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Here's how:
 
@@ -272,13 +314,13 @@ Please open an issue first for large changes so we can discuss the approach.
 
 ---
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
 
 ---
 
-## 🙏 Acknowledgements
+## Acknowledgements
 
 - [Google MediaPipe](https://ai.google.dev/edge/mediapipe/solutions/genai/llm_inference) — On-device LLM inference
 - [Google Gemini API](https://ai.google.dev) — Cloud AI with vision capabilities
@@ -292,8 +334,8 @@ This project is licensed under the MIT License — see the [LICENSE](LICENSE) fi
 
 <div align="center">
 
-**Built with ❤️ by [ashokvarmamatta](https://github.com/ashokvarmamatta)**
+**Built with care by [ashokvarmamatta](https://github.com/ashokvarmamatta)**
 
-*Your pocket AI — online or offline, always ready*
+*Your pocket AI — offline first, always private, always ready*
 
 </div>

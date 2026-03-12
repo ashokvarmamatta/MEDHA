@@ -25,7 +25,13 @@ data class ChatState(
     val apiKeyTestResult: String? = null,
     // Grand Master mode
     val activeGrandMaster: GrandMaster? = null,
-    val showGrandMasterPicker: Boolean = false
+    val activeCustomGrandMaster: CustomGrandMaster? = null,
+    val showGrandMasterPicker: Boolean = false,
+    val showResumeOrResetDialog: Boolean = false,
+    val pendingGrandMaster: GrandMaster? = null,
+    val pendingCustomGrandMaster: CustomGrandMaster? = null,
+    val customGrandMasters: List<CustomGrandMaster> = emptyList(),
+    val showCreateGrandMaster: Boolean = false
 ) {
     val hasAnyValidatedKey: Boolean get() = apiKeys.any { it.isValidated }
     val validatedKeys: List<ApiKeyEntry> get() = apiKeys.filter { it.isValidated }
