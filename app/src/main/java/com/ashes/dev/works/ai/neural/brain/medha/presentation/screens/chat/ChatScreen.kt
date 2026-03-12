@@ -16,6 +16,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -81,6 +82,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -89,12 +91,14 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.AppMode
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.ChatState
+import com.ashes.dev.works.ai.neural.brain.medha.domain.model.GrandMaster
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.Message
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.ModelStatus
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.PromptTemplate
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.PromptTemplates
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.TemplateCategory
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.User
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import com.ashes.dev.works.ai.neural.brain.medha.ui.theme.AccentCyan
 import com.ashes.dev.works.ai.neural.brain.medha.ui.theme.AccentGold
 import com.ashes.dev.works.ai.neural.brain.medha.ui.theme.AccentGreen
@@ -162,12 +166,28 @@ fun ChatScreen(
         )
     }
 
+    // Grand Master picker
+    if (uiState.showGrandMasterPicker) {
+        GrandMasterPickerSheet(
+            onDismiss = { viewModel.hideGrandMasterPicker() },
+            onSelect = { grandMaster -> viewModel.activateGrandMaster(grandMaster) },
+            activeGrandMaster = uiState.activeGrandMaster
+        )
+    }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             Surface(shadowElevation = 4.dp, color = MaterialTheme.colorScheme.surface) {
                 TopAppBar(
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                    navigationIcon = {
+                        if (uiState.activeGrandMaster != null) {
+                            IconButton(onClick = { viewModel.exitGrandMaster() }) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Exit Grand Master", tint = MaterialTheme.colorScheme.onSurface)
+                            }
+                        }
+                    },
                     title = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             StatusDot(modelStatus = uiState.modelStatus)
@@ -175,8 +195,8 @@ fun ChatScreen(
                             Column {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        "MEDHA",
-                                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = 2.sp),
+                                        if (uiState.activeGrandMaster != null) "${uiState.activeGrandMaster!!.icon} ${uiState.activeGrandMaster!!.title}" else "MEDHA",
+                                        style = if (uiState.activeGrandMaster != null) MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold) else MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = 2.sp),
                                         color = MaterialTheme.colorScheme.primary
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
@@ -202,6 +222,12 @@ fun ChatScreen(
                         }
                     },
                     actions = {
+                        // Grand Master picker button (only when not in a Grand Master session)
+                        if (uiState.activeGrandMaster == null && uiState.modelStatus is ModelStatus.Ready) {
+                            IconButton(onClick = { viewModel.showGrandMasterPicker() }) {
+                                Text("\uD83C\uDFC6", fontSize = 20.sp) // trophy icon
+                            }
+                        }
                         if (uiState.messages.isNotEmpty()) {
                             IconButton(onClick = { viewModel.clearChat() }) {
                                 Icon(Icons.Default.Delete, "Clear", tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
@@ -244,7 +270,13 @@ fun ChatScreen(
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
             if (uiState.messages.isEmpty() && !uiState.isGenerating) {
-                WelcomeContent(uiState, onRetry = { viewModel.initializeEngine() }, onViewLogs = onNavigateToLogs, onOpenSettings = onNavigateToSettings)
+                WelcomeContent(
+                    uiState,
+                    onRetry = { viewModel.initializeEngine() },
+                    onViewLogs = onNavigateToLogs,
+                    onOpenSettings = onNavigateToSettings,
+                    onSelectGrandMaster = { viewModel.activateGrandMaster(it) }
+                )
             } else {
                 LazyColumn(
                     state = listState, modifier = Modifier.fillMaxSize(),
@@ -256,7 +288,7 @@ fun ChatScreen(
                             visible = true,
                             enter = fadeIn(tween(300)) + slideInVertically(initialOffsetY = { it / 2 }, animationSpec = tween(300))
                         ) {
-                            MessageBubble(message = message, viewModel = viewModel)
+                            MessageBubble(message = message, viewModel = viewModel, aiName = uiState.activeGrandMaster?.title ?: "Medha")
                         }
                     }
                     if (uiState.isGenerating) {
@@ -447,6 +479,99 @@ private fun ImageResponseStyleSheet(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun GrandMasterPickerSheet(
+    onDismiss: () -> Unit,
+    onSelect: (GrandMaster) -> Unit,
+    activeGrandMaster: GrandMaster?
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
+            Text(
+                "Grand Masters",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "Start a specialized AI session with deep expertise",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+
+            GrandMaster.entries.forEach { gm ->
+                val isActive = gm == activeGrandMaster
+                Surface(
+                    onClick = { if (!isActive) onSelect(gm) },
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (isActive)
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                    else
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                    border = if (isActive) BorderStroke(
+                        2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                    ) else null,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(gm.icon, fontSize = 32.sp)
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    gm.title,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                if (isActive) {
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = StatusSuccess.copy(alpha = 0.15f)
+                                    ) {
+                                        Text(
+                                            "ACTIVE",
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                                            color = StatusSuccess
+                                        )
+                                    }
+                                }
+                            }
+                            Text(
+                                gm.subtitle,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                gm.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun StatusDot(modelStatus: ModelStatus) {
     val color = when (modelStatus) {
@@ -466,7 +591,7 @@ private fun StatusDot(modelStatus: ModelStatus) {
 }
 
 @Composable
-private fun WelcomeContent(uiState: ChatState, onRetry: () -> Unit, onViewLogs: () -> Unit, onOpenSettings: () -> Unit) {
+private fun WelcomeContent(uiState: ChatState, onRetry: () -> Unit, onViewLogs: () -> Unit, onOpenSettings: () -> Unit, onSelectGrandMaster: (GrandMaster) -> Unit = {}) {
     Column(
         modifier = Modifier.fillMaxSize().padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -528,7 +653,7 @@ private fun WelcomeContent(uiState: ChatState, onRetry: () -> Unit, onViewLogs: 
                         }
                     }
                 }
-                if (uiState.modelStatus is ModelStatus.Error && uiState.appMode is AppMode.Online && uiState.apiKey.isBlank()) {
+                if (uiState.modelStatus is ModelStatus.Error && uiState.appMode is AppMode.Online && uiState.apiKeys.isEmpty()) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(12.dp)) {
                         Column(modifier = Modifier.padding(16.dp)) {
@@ -562,7 +687,44 @@ private fun WelcomeContent(uiState: ChatState, onRetry: () -> Unit, onViewLogs: 
 
         if (uiState.modelStatus is ModelStatus.Ready) {
             Spacer(modifier = Modifier.height(24.dp))
-            Text("Type a message or tap the menu for quick actions", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f))
+            Text("Type a message or start a Grand Master session", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f))
+
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                GrandMaster.entries.forEach { gm ->
+                    Surface(
+                        onClick = { onSelectGrandMaster(gm) },
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.width(140.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(gm.icon, fontSize = 28.sp)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                gm.title.replace("Grand Master", "GM"),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1
+                            )
+                            Text(
+                                gm.subtitle,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -579,7 +741,7 @@ private fun SetupStep(number: String, text: String) {
 }
 
 @Composable
-private fun MessageBubble(message: Message, viewModel: ChatViewModel) {
+private fun MessageBubble(message: Message, viewModel: ChatViewModel, aiName: String = "Medha") {
     val isUser = message.user == User.Person
     val bubbleShape = if (isUser) RoundedCornerShape(20.dp, 20.dp, 4.dp, 20.dp) else RoundedCornerShape(20.dp, 20.dp, 20.dp, 4.dp)
     val containerColor = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
@@ -593,7 +755,7 @@ private fun MessageBubble(message: Message, viewModel: ChatViewModel) {
         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
     ) {
-        Text(if (isUser) "You" else "Medha", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f), modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
+        Text(if (isUser) "You" else aiName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f), modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
 
         Card(
             colors = CardDefaults.cardColors(containerColor = containerColor),

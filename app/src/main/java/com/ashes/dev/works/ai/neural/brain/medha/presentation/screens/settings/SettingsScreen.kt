@@ -17,15 +17,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -54,12 +54,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ashes.dev.works.ai.neural.brain.medha.data.remote.GeminiModelInfo
+import com.ashes.dev.works.ai.neural.brain.medha.domain.model.ApiKeyEntry
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.AppMode
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.ModelInfo
 import com.ashes.dev.works.ai.neural.brain.medha.presentation.screens.chat.ChatViewModel
@@ -77,8 +76,8 @@ fun SettingsScreen(
     onNavigateBack: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    var showApiKey by remember { mutableStateOf(false) }
-    var apiKeyInput by remember(uiState.apiKey) { mutableStateOf(uiState.apiKey) }
+    var newKeyInput by remember { mutableStateOf("") }
+    var newKeyLabel by remember { mutableStateOf("") }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -140,10 +139,17 @@ fun SettingsScreen(
 
             // Online Settings
             if (uiState.appMode is AppMode.Online) {
-                // Step 1: API Key
-                SectionHeader("Step 1 \u2014 API Key")
+                // ===== API Keys Section =====
+                SectionHeader("API Keys")
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "${uiState.apiKeys.size} key(s) added, ${uiState.validatedKeys.size} validated",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                )
                 Spacer(modifier = Modifier.height(8.dp))
 
+                // Add new key form
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
@@ -151,7 +157,7 @@ fun SettingsScreen(
                 ) {
                     Column(modifier = Modifier.padding(16.dp).animateContentSize()) {
                         Text(
-                            "Gemini API Key",
+                            "Add API Key",
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -164,43 +170,45 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.height(8.dp))
 
                         OutlinedTextField(
-                            value = apiKeyInput,
-                            onValueChange = { apiKeyInput = it },
+                            value = newKeyInput,
+                            onValueChange = { newKeyInput = it },
                             modifier = Modifier.fillMaxWidth(),
                             placeholder = { Text("Paste your API key here", style = MaterialTheme.typography.bodyMedium) },
-                            visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = MaterialTheme.colorScheme.primary,
                                 unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-                            ),
-                            trailingIcon = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Surface(onClick = { showApiKey = !showApiKey }, color = Color.Transparent) {
-                                        Text(
-                                            if (showApiKey) "Hide" else "Show",
-                                            modifier = Modifier.padding(8.dp),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                }
-                            }
+                            )
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        OutlinedTextField(
+                            value = newKeyLabel,
+                            onValueChange = { newKeyLabel = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("Label (optional, e.g. 'Personal', 'Work')", style = MaterialTheme.typography.bodyMedium) },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                            )
                         )
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // Save / Fetch Models button
-                        val keyChanged = apiKeyInput != uiState.apiKey && apiKeyInput.isNotBlank()
-                        val canSave = apiKeyInput.isNotBlank()
-
                         Surface(
                             onClick = {
-                                if (canSave) viewModel.setApiKey(apiKeyInput)
+                                if (newKeyInput.isNotBlank()) {
+                                    viewModel.addApiKey(newKeyInput.trim(), newKeyLabel.trim())
+                                    newKeyInput = ""
+                                    newKeyLabel = ""
+                                }
                             },
                             shape = RoundedCornerShape(10.dp),
-                            color = if (canSave) AccentCyan else MaterialTheme.colorScheme.surfaceVariant,
+                            color = if (newKeyInput.isNotBlank()) AccentCyan else MaterialTheme.colorScheme.surfaceVariant,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
@@ -217,11 +225,16 @@ fun SettingsScreen(
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Text("Fetching models...", color = Color.White, style = MaterialTheme.typography.labelLarge)
                                 } else {
-                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp), tint = if (canSave) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+                                    Icon(
+                                        Icons.Default.Add,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                        tint = if (newKeyInput.isNotBlank()) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                                    )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        if (keyChanged || uiState.onlineAvailableModels.isEmpty()) "Save Key & Fetch Models" else "Re-fetch Models",
-                                        color = if (canSave) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                                        "Add Key & Fetch Models",
+                                        color = if (newKeyInput.isNotBlank()) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
                                         style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.SemiBold
                                     )
@@ -232,8 +245,8 @@ fun SettingsScreen(
                         // Status message
                         uiState.apiKeyTestResult?.let { result ->
                             Spacer(modifier = Modifier.height(10.dp))
-                            val isSuccess = uiState.apiKeyValidated
-                            val isError = result.startsWith("Invalid") || result.startsWith("Error") || result.startsWith("Test failed")
+                            val isSuccess = result.contains("validated") || result.contains("Found")
+                            val isError = result.startsWith("Invalid") || result.startsWith("Error") || result.startsWith("Failed") || result.startsWith("This API key")
                             val color = when {
                                 isSuccess -> StatusSuccess
                                 isError -> StatusError
@@ -259,7 +272,43 @@ fun SettingsScreen(
                     }
                 }
 
-                // Step 2: Model Selection (only show after models are fetched)
+                // ===== Saved Keys List =====
+                if (uiState.apiKeys.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                "Saved Keys",
+                                modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+
+                            uiState.apiKeys.forEachIndexed { index, entry ->
+                                ApiKeyItem(
+                                    entry = entry,
+                                    isActive = uiState.activeKey?.id == entry.id,
+                                    isTesting = uiState.isTestingKeyId == entry.id,
+                                    onTest = { viewModel.testApiKey(entry.id) },
+                                    onDelete = { viewModel.removeApiKey(entry.id) }
+                                )
+                                if (index < uiState.apiKeys.size - 1) {
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 8.dp),
+                                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ===== Model Selection =====
                 AnimatedVisibility(
                     visible = uiState.onlineAvailableModels.isNotEmpty(),
                     enter = fadeIn(),
@@ -267,7 +316,7 @@ fun SettingsScreen(
                 ) {
                     Column {
                         Spacer(modifier = Modifier.height(24.dp))
-                        SectionHeader("Step 2 \u2014 Select Model")
+                        SectionHeader("Select Model")
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             "${uiState.onlineAvailableModels.size} models available",
@@ -282,7 +331,6 @@ fun SettingsScreen(
                             shape = RoundedCornerShape(16.dp)
                         ) {
                             Column(modifier = Modifier.padding(4.dp)) {
-                                // Show recommended models first, then rest
                                 val recommended = uiState.onlineAvailableModels.filter {
                                     it.modelId.contains("flash") || it.modelId.contains("pro")
                                 }
@@ -342,65 +390,38 @@ fun SettingsScreen(
                             }
                         }
 
-                        // Step 3: Test
-                        Spacer(modifier = Modifier.height(24.dp))
-                        SectionHeader("Step 3 \u2014 Test Connection")
-                        Spacer(modifier = Modifier.height(8.dp))
+                        // Test key button (test selected model with first unvalidated or all keys)
+                        if (uiState.apiKeys.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                "Test a key above to validate it for chatting.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                            )
+                        }
 
-                        Surface(
-                            onClick = {
-                                if (!uiState.isTestingApiKey) viewModel.testApiKeyAndModel()
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (uiState.apiKeyValidated) StatusSuccess else AccentGold,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(16.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
+                        if (uiState.hasAnyValidatedKey) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = StatusSuccess,
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                if (uiState.isTestingApiKey) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
-                                        strokeWidth = 2.dp,
-                                        color = Color.White
-                                    )
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text("Testing...", color = Color.White, style = MaterialTheme.typography.labelLarge)
-                                } else if (uiState.apiKeyValidated) {
+                                Row(
+                                    modifier = Modifier.padding(16.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(20.dp), tint = Color.White)
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        "Validated! Ready to chat",
-                                        color = Color.White,
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                } else {
-                                    Text(
-                                        "\uD83D\uDD25",
-                                        fontSize = 18.sp
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        "Test API Key + ${uiState.onlineModelName}",
+                                        "Ready to chat! Go back and start.",
                                         color = Color.White,
                                         style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
                             }
-                        }
-
-                        if (uiState.apiKeyValidated) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                "Go back and start chatting!",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = StatusSuccess,
-                                fontWeight = FontWeight.Medium
-                            )
                         }
                     }
                 }
@@ -479,7 +500,9 @@ fun SettingsScreen(
                     if (uiState.appMode is AppMode.Online) {
                         StatusRow("Model", uiState.onlineModelName)
                         Spacer(modifier = Modifier.height(6.dp))
-                        StatusRow("Validated", if (uiState.apiKeyValidated) "Yes" else "No")
+                        StatusRow("API Keys", "${uiState.validatedKeys.size}/${uiState.apiKeys.size} validated")
+                        Spacer(modifier = Modifier.height(6.dp))
+                        StatusRow("Active Key", uiState.activeKey?.label ?: "None")
                     } else {
                         StatusRow("Model", uiState.selectedModel?.displayName ?: "None selected")
                         uiState.selectedModel?.let {
@@ -495,6 +518,114 @@ fun SettingsScreen(
                     StatusRow("Version", ChatViewModel.APP_VERSION)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ApiKeyItem(
+    entry: ApiKeyEntry,
+    isActive: Boolean,
+    isTesting: Boolean,
+    onTest: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Status indicator
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .border(
+                    width = 2.dp,
+                    color = if (entry.isValidated) StatusSuccess else if (entry.lastError != null) StatusError else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                    shape = RoundedCornerShape(50)
+                )
+        )
+
+        Spacer(modifier = Modifier.width(10.dp))
+
+        // Key info
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    entry.label,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (entry.isValidated) StatusSuccess else MaterialTheme.colorScheme.onSurface
+                )
+                if (isActive && entry.isValidated) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = AccentCyan.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            "ACTIVE",
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = AccentCyan,
+                            fontSize = 9.sp
+                        )
+                    }
+                }
+            }
+            Text(
+                entry.maskedKey,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                fontWeight = FontWeight.Medium
+            )
+            entry.lastError?.let { err ->
+                Text(
+                    err.take(50),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = StatusError,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+
+        // Test button
+        Surface(
+            onClick = { if (!isTesting) onTest() },
+            shape = RoundedCornerShape(8.dp),
+            color = if (entry.isValidated) StatusSuccess.copy(alpha = 0.1f) else AccentGold.copy(alpha = 0.15f)
+        ) {
+            Box(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                if (isTesting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = AccentGold
+                    )
+                } else {
+                    Text(
+                        if (entry.isValidated) "Re-test" else "Test",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = if (entry.isValidated) StatusSuccess else AccentGold
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.width(4.dp))
+
+        // Delete button
+        IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+            Icon(
+                Icons.Default.Delete,
+                contentDescription = "Remove key",
+                modifier = Modifier.size(18.dp),
+                tint = StatusError.copy(alpha = 0.6f)
+            )
         }
     }
 }

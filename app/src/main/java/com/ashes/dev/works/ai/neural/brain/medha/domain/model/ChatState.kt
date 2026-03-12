@@ -10,7 +10,9 @@ data class ChatState(
     val appMode: AppMode = AppMode.Offline,
     val availableModels: List<ModelInfo> = emptyList(),
     val selectedModel: ModelInfo? = null,
-    val apiKey: String = "",
+    // Multi API key support
+    val apiKeys: List<ApiKeyEntry> = emptyList(),
+    val activeKeyIndex: Int = 0,
     val onlineModelName: String = "gemini-2.0-flash",
     val pendingImageUri: String? = null,
     val showPromptTemplates: Boolean = false,
@@ -19,7 +21,13 @@ data class ChatState(
     // Online model selection & validation
     val onlineAvailableModels: List<GeminiModelInfo> = emptyList(),
     val isFetchingOnlineModels: Boolean = false,
-    val isTestingApiKey: Boolean = false,
-    val apiKeyValidated: Boolean = false,
-    val apiKeyTestResult: String? = null
-)
+    val isTestingKeyId: String? = null,
+    val apiKeyTestResult: String? = null,
+    // Grand Master mode
+    val activeGrandMaster: GrandMaster? = null,
+    val showGrandMasterPicker: Boolean = false
+) {
+    val hasAnyValidatedKey: Boolean get() = apiKeys.any { it.isValidated }
+    val validatedKeys: List<ApiKeyEntry> get() = apiKeys.filter { it.isValidated }
+    val activeKey: ApiKeyEntry? get() = validatedKeys.getOrNull(activeKeyIndex.coerceIn(0, (validatedKeys.size - 1).coerceAtLeast(0)))
+}
