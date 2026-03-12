@@ -1,14 +1,24 @@
 name: Build & Release APK
 
-# Triggers:
-#   1. Push to master → builds APK, auto-creates tag & GitHub Release
-#   2. Push to other branches → builds APK only (artifact, no release)
-#   3. Manual trigger → builds APK + creates Release
+# ============================================================
+# HOW IT WORKS:
+#
+# JUST COMMIT & PUSH (any branch):
+#   → Nothing happens. No build, no release.
+#   → Your code is safely on GitHub.
+#
+# MERGE TO MASTER (PR merge / direct push to master):
+#   → Auto builds APK → creates tag → creates GitHub Release
+#   → APKs attached for users to download
+#
+# MANUAL (anytime):
+#   → Go to Actions tab → "Build & Release APK" → "Run workflow"
+# ============================================================
 
 on:
   push:
     branches:
-      - '**'
+      - master
   workflow_dispatch:
     inputs:
       release_name:
@@ -20,8 +30,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build APK
+  build-and-release:
+    name: Build & Release
     runs-on: ubuntu-latest
 
     steps:
@@ -59,14 +69,11 @@ jobs:
       - name: Get version and prepare APKs
         id: apk_info
         run: |
-          # Get version from build.gradle.kts
           VERSION=$(grep 'versionName' app/build.gradle.kts | head -1 | sed 's/.*"\(.*\)".*/\1/')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-          # Debug APK
           cp app/build/outputs/apk/debug/app-debug.apk MEDHA-v${VERSION}-debug.apk
 
-          # Release APK (unsigned unless signing is configured)
           if [ -f app/build/outputs/apk/release/app-release-unsigned.apk ]; then
             cp app/build/outputs/apk/release/app-release-unsigned.apk MEDHA-v${VERSION}-release.apk
           elif [ -f app/build/outputs/apk/release/app-release.apk ]; then
@@ -75,30 +82,25 @@ jobs:
 
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
-      # Always upload as artifact (available for any build)
       - name: Upload Debug APK as Artifact
         uses: actions/upload-artifact@v4
         with:
           name: MEDHA-debug-apk
           path: MEDHA-*-debug.apk
-          retention-days: 30
+          retention-days: 90
 
       - name: Upload Release APK as Artifact
         uses: actions/upload-artifact@v4
         with:
           name: MEDHA-release-apk
           path: MEDHA-*-release.apk
-          retention-days: 30
+          retention-days: 90
 
-      # Auto-create tag and release on master push or manual trigger
       - name: Generate release tag
-        if: github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
         id: release_tag
         run: |
           VERSION="${{ steps.apk_info.outputs.version }}"
           RUN="${{ github.run_number }}"
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          DATE=$(date +'%Y%m%d')
 
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.release_name }}" ]]; then
             TAG="${{ github.event.inputs.release_name }}"
@@ -109,14 +111,12 @@ jobs:
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "name=MEDHA $TAG" >> $GITHUB_OUTPUT
 
-          # Get commit message for release notes
           COMMIT_MSG=$(git log -1 --pretty=%B)
           echo "commit_msg<<EOF" >> $GITHUB_OUTPUT
           echo "$COMMIT_MSG" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create Git Tag
-        if: github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -124,7 +124,6 @@ jobs:
           git push origin "${{ steps.release_tag.outputs.tag }}"
 
       - name: Create GitHub Release with APKs
-        if: github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release_tag.outputs.tag }}

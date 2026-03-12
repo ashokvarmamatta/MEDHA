@@ -140,8 +140,8 @@ fun ChatScreen(
             onSelectTemplate = { template ->
                 viewModel.hidePromptTemplates()
                 if (template.category == TemplateCategory.IMAGE) {
-                    // Image template: attach image first, set prompt
-                    prompt = template.promptPrefix
+                    // Image template: store template, open picker → after pick, style picker shows
+                    viewModel.setPendingImageTemplate(template)
                     imagePickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                 } else if (template.requiresInput) {
                     prompt = template.promptPrefix
@@ -150,6 +150,15 @@ fun ChatScreen(
                 }
             },
             isOnlineMode = uiState.appMode is AppMode.Online
+        )
+    }
+
+    // Image response style picker (shown after image selected via template)
+    if (uiState.showImageResponseStylePicker) {
+        ImageResponseStyleSheet(
+            templateTitle = uiState.pendingImageTemplate?.title ?: "Image Analysis",
+            onDismiss = { viewModel.dismissImageResponseStylePicker() },
+            onSelectStyle = { style -> viewModel.sendImageWithStyle(style) }
         )
     }
 
@@ -247,7 +256,7 @@ fun ChatScreen(
                             visible = true,
                             enter = fadeIn(tween(300)) + slideInVertically(initialOffsetY = { it / 2 }, animationSpec = tween(300))
                         ) {
-                            MessageBubble(message = message)
+                            MessageBubble(message = message, viewModel = viewModel)
                         }
                     }
                     if (uiState.isGenerating) {
@@ -267,9 +276,7 @@ private fun PromptTemplatesSheet(
     isOnlineMode: Boolean
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val categories = TemplateCategory.entries.filter {
-        if (!isOnlineMode) it != TemplateCategory.IMAGE else true
-    }
+    val categories = TemplateCategory.entries
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -314,35 +321,125 @@ private fun PromptTemplatesSheet(
                             )
                         }
                         items(templates) { template ->
+                            val isImageTemplate = template.category == TemplateCategory.IMAGE
+                            val isDisabled = isImageTemplate && !isOnlineMode
                             Surface(
-                                onClick = { onSelectTemplate(template) },
+                                onClick = { if (!isDisabled) onSelectTemplate(template) },
                                 shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                color = if (isDisabled)
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+                                else
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
                                 modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
                             ) {
                                 Row(
                                     modifier = Modifier.padding(14.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(template.icon, fontSize = 22.sp)
+                                    Text(template.icon, fontSize = 22.sp, color = if (isDisabled) Color.Unspecified.copy(alpha = 0.4f) else Color.Unspecified)
                                     Spacer(modifier = Modifier.width(14.dp))
                                     Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                template.title,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = if (isDisabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f) else MaterialTheme.colorScheme.onSurface
+                                            )
+                                            if (isImageTemplate) {
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Surface(
+                                                    shape = RoundedCornerShape(4.dp),
+                                                    color = if (isOnlineMode) AccentCyan.copy(alpha = 0.15f) else StatusWarning.copy(alpha = 0.15f)
+                                                ) {
+                                                    Text(
+                                                        if (isOnlineMode) "ONLINE" else "NEEDS ONLINE",
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp, fontWeight = FontWeight.Bold),
+                                                        color = if (isOnlineMode) AccentCyan else StatusWarning
+                                                    )
+                                                }
+                                            }
+                                        }
                                         Text(
-                                            template.title,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Text(
-                                            template.description,
+                                            if (isDisabled) "Switch to Online mode in Settings" else template.description,
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                            color = if (isDisabled) StatusWarning.copy(alpha = 0.6f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                                         )
                                     }
                                 }
                             }
                         }
                         item { Spacer(modifier = Modifier.height(8.dp)) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ImageResponseStyleSheet(
+    templateTitle: String,
+    onDismiss: () -> Unit,
+    onSelectStyle: (ImageResponseStyle) -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
+            Text(
+                templateTitle,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "Image attached! How would you like the response?",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+
+            ImageResponseStyle.entries.forEach { style ->
+                Surface(
+                    onClick = { onSelectStyle(style) },
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(style.icon, fontSize = 24.sp)
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                style.label,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                style.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                            )
+                        }
+                        Icon(
+                            Icons.AutoMirrored.Filled.Send,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                        )
                     }
                 }
             }
@@ -482,11 +579,12 @@ private fun SetupStep(number: String, text: String) {
 }
 
 @Composable
-private fun MessageBubble(message: Message) {
+private fun MessageBubble(message: Message, viewModel: ChatViewModel) {
     val isUser = message.user == User.Person
     val bubbleShape = if (isUser) RoundedCornerShape(20.dp, 20.dp, 4.dp, 20.dp) else RoundedCornerShape(20.dp, 20.dp, 20.dp, 4.dp)
     val containerColor = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
     val textColor = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer
+    val context = LocalContext.current
 
     val timeFormat = remember { SimpleDateFormat("hh:mm a", Locale.getDefault()) }
     val timeText = remember(message.timestamp) { timeFormat.format(Date(message.timestamp)) }
@@ -504,10 +602,10 @@ private fun MessageBubble(message: Message) {
             modifier = Modifier.widthIn(max = 320.dp).animateContentSize()
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
-                // Image preview
+                // User attached image
                 message.imageUri?.let { uri ->
                     AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current).data(Uri.parse(uri)).crossfade(true).build(),
+                        model = ImageRequest.Builder(context).data(Uri.parse(uri)).crossfade(true).build(),
                         contentDescription = "Attached image",
                         modifier = Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(12.dp)),
                         contentScale = ContentScale.Crop
@@ -515,10 +613,101 @@ private fun MessageBubble(message: Message) {
                     Spacer(modifier = Modifier.height(8.dp))
                 }
 
-                Text(message.text, style = MaterialTheme.typography.bodyLarge, color = textColor)
+                // Text content
+                if (message.text.isNotBlank()) {
+                    Text(message.text, style = MaterialTheme.typography.bodyLarge, color = textColor)
+                }
+
+                // AI generated images
+                if (message.generatedImages.isNotEmpty()) {
+                    if (message.text.isNotBlank()) Spacer(modifier = Modifier.height(10.dp))
+                    message.generatedImages.forEach { genImage ->
+                        GeneratedImageCard(
+                            image = genImage,
+                            onSave = { viewModel.saveGeneratedImage(genImage) }
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(timeText, style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp), color = textColor.copy(alpha = 0.5f), modifier = Modifier.align(Alignment.End))
             }
+        }
+    }
+}
+
+@Composable
+private fun GeneratedImageCard(
+    image: com.ashes.dev.works.ai.neural.brain.medha.domain.model.GeneratedImage,
+    onSave: () -> Unit
+) {
+    val context = LocalContext.current
+    var saved by remember { mutableStateOf(false) }
+
+    // Decode base64 to bitmap
+    val bitmap = remember(image.id) {
+        try {
+            val bytes = android.util.Base64.decode(image.base64Data, android.util.Base64.DEFAULT)
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    Column {
+        if (bitmap != null) {
+            // Image preview
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                AsyncImage(
+                    model = ImageRequest.Builder(context).data(bitmap).crossfade(true).build(),
+                    contentDescription = "AI generated image",
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)),
+                    contentScale = ContentScale.FillWidth
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Download button
+            Surface(
+                onClick = {
+                    onSave()
+                    saved = true
+                },
+                shape = RoundedCornerShape(8.dp),
+                color = if (saved)
+                    StatusSuccess.copy(alpha = 0.15f)
+                else
+                    AccentCyan.copy(alpha = 0.15f)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        if (saved) "\u2705" else "\uD83D\uDCBE",
+                        fontSize = 14.sp
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        if (saved) "Saved to Gallery" else "Save to Gallery",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (saved) StatusSuccess else AccentCyan
+                    )
+                }
+            }
+        } else {
+            // Fallback if decode fails
+            Text(
+                "Failed to load generated image",
+                style = MaterialTheme.typography.bodySmall,
+                color = StatusError
+            )
         }
     }
 }
