@@ -1,26 +1,24 @@
 name: Build & Release APK
 
 # ============================================================
-# HOW TO USE (from Android Studio):
+# HOW IT WORKS:
 #
-# JUST COMMIT & PUSH (no build, no release):
-#   → Push to any branch EXCEPT "release"
-#   → The workflow will NOT run
-#   → Your code is safely on GitHub, nothing else happens
+# JUST COMMIT & PUSH (any branch):
+#   → Nothing happens. No build, no release.
+#   → Your code is safely on GitHub.
 #
-# COMMIT + BUILD APK + RELEASE:
-#   → Push to the "release" branch (or merge into it)
-#   → Workflow auto-builds APK, creates tag, creates GitHub Release
-#   → APKs are attached to the release for users to download
+# MERGE TO MASTER (PR merge / direct push to master):
+#   → Auto builds APK → creates tag → creates GitHub Release
+#   → APKs attached for users to download
 #
-# MANUAL RELEASE (anytime from browser):
+# MANUAL (anytime):
 #   → Go to Actions tab → "Build & Release APK" → "Run workflow"
 # ============================================================
 
 on:
   push:
     branches:
-      - 'release'
+      - master
   workflow_dispatch:
     inputs:
       release_name:
@@ -32,8 +30,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build APK
+  build-and-release:
+    name: Build & Release
     runs-on: ubuntu-latest
 
     steps:
