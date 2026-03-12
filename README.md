@@ -1,84 +1,140 @@
-# MEDHA - Offline AI Chat Application
+# MEDHA - AI Chat Application (Offline + Online)
 
-MEDHA is a fully offline, on-device AI chat application for Android, built with Kotlin and Jetpack Compose. It uses Google's MediaPipe GenAI Tasks library to run the Gemma 2B model locally, allowing you to chat with an AI without an internet connection.
+MEDHA is a premium AI chat application for Android that supports both **offline on-device inference** and **online cloud-powered AI**. Built with Kotlin, Jetpack Compose, and Material 3, it offers a rich, full-featured chat experience with image analysis, prompt templates, and more.
 
-## 🚀 Features
+## Features
 
-- **Offline First:** All AI processing happens directly on your device.
-- **On-Device AI:** Powered by the Gemma 2B model via the MediaPipe GenAI library.
-- **Modern UI:** A clean, responsive chat interface built with Jetpack Compose and Material 3.
-- **MVVM Architecture:** Follows a robust Model-View-ViewModel pattern.
-- **Dependency Injection:** Uses Koin for managing dependencies.
-- **Error Handling:** Gracefully handles model loading errors and permission issues.
+### Dual Mode AI
+- **Offline Mode:** Run AI locally on your device using Google's MediaPipe GenAI with Gemma 2B model - no internet required
+- **Online Mode:** Connect to Google Gemini API (gemini-2.0-flash) for powerful cloud-based responses
+- Switch between modes seamlessly from Settings
 
-## 🛠️ Tech Stack
+### Image Analysis
+- Upload images from your gallery using Android Photo Picker
+- Analyze images with AI-powered descriptions (Online mode via Gemini Vision API)
+- Extract text from images (OCR)
+- Analyze artistic styles and compositions
+- Image previews displayed inline in chat bubbles
+
+### Pre-built Prompt Templates
+22 ready-to-use prompt templates across 6 categories:
+- **Analysis:** Summarize Text, Explain Simply, Pros & Cons, Key Takeaways
+- **Writing:** Write Email, Fix Grammar, Translate, Rewrite Formal
+- **Code:** Explain Code, Debug Code, Refactor Code, Write Code
+- **Creative:** Brainstorm Ideas, Write Story, Write Poem
+- **Utility:** Compare, Make Plan, Quiz Me, Make List
+- **Image:** Analyze Image, Extract Text from Image, Describe Art Style
+
+### Premium UI
+- Custom dark/light Material 3 theme with premium color palette
+- Animated status indicators and smooth transitions
+- Chat bubbles with Markdown-style formatting
+- Welcome screen with setup guides for each mode
+- Edge-to-edge display with proper system bar handling
+
+### Additional Screens
+- **Settings:** Mode selection, API key management, offline model picker with rescan
+- **Logs:** Real-time engine log viewer with color-coded severity levels
+- **About:** Full app guide, feature documentation, setup instructions, privacy info
+
+## Tech Stack
 
 - **Language:** Kotlin
 - **UI:** Jetpack Compose (Material 3)
 - **Architecture:** MVVM (Model-View-ViewModel)
-- **AI Engine:** `com.google.mediapipe:tasks-genai:0.10.14`
+- **Offline AI:** MediaPipe GenAI Tasks (`com.google.mediapipe:tasks-genai:0.10.14`)
+- **Online AI:** Google Gemini REST API via Retrofit + OkHttp + Moshi
+- **Image Loading:** Coil (Compose integration)
+- **Navigation:** Navigation Compose with animated transitions
 - **Dependency Injection:** Koin
+- **Min SDK:** 24 | **Target SDK:** 35
 
-## ⚙️ Setup and Installation
-
-To get the application running, follow these steps:
+## Setup and Installation
 
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/your-username/medha.git
-cd medha
+git clone https://github.com/ashokvarmamatta/MEDHA.git
+cd MEDHA
 ```
 
-### 2. Download the AI Model
+### 2. Offline Mode Setup
 
-This application requires the **Gemma 2B** model file to function.
+This requires the **Gemma 2B** model file on your device.
 
-- **Model File:** `gemma-2b-it-gpu-int4.bin`
-- **Download Link:** You can find compatible models on [Kaggle](https://www.kaggle.com/models/google/gemma/frameworks/gemma-cpp). Make sure you download the GPU-compatible `int4` version for the best performance on mobile devices.
+**Download the model:**
+- Model file: `gemma-2b-it-gpu-int4.bin`
+- Source: [Kaggle - Google Gemma](https://www.kaggle.com/models/google/gemma/frameworks/gemma-cpp) (download the GPU-compatible `int4` version)
 
-### 3. Place the Model on Your Device
+**Push to device:**
+```bash
+adb push path/to/gemma-2b-it-gpu-int4.bin /storage/emulated/0/Download/
+```
 
-The application is hardcoded to look for the model file in the **`Downloads`** folder of your device's external storage.
+The app scans the Downloads folder for compatible `.bin` model files. If multiple models are found, you can choose which one to load from Settings.
 
-1.  Connect your Android device to your computer.
-2.  Use the following `adb` command to push the model file to the correct location:
+**Grant permissions:** On first launch, grant "All Files Access" when prompted - this is needed to read model files from storage.
 
-    ```bash
-    adb push path/to/your/gemma-2b-it-gpu-int4.bin /storage/emulated/0/Download/
-    ```
+### 3. Online Mode Setup
 
-    *Replace `path/to/your/` with the actual path to the downloaded model file.*
+1. Get a free API key from [Google AI Studio](https://aistudio.google.com/apikey)
+2. Open MEDHA > Settings
+3. Switch to Online mode
+4. Enter your Gemini API key
 
-### 4. Grant Storage Permissions
+No model download required - responses are generated in the cloud.
 
-On the first launch, the app will request **"All Files Access"** permission. This is required to read the `gemma-2b-it-gpu-int4.bin` model from the Downloads folder.
+### 4. Build and Run
 
-- A toast message will appear to guide you.
-- You will be redirected to the system settings to grant the permission.
+Open the project in Android Studio and build. Requires:
+- Android Studio Ladybug or newer
+- JDK 17+
+- Android device or emulator (API 24+)
 
-### 5. Build and Run
+## Project Structure
 
-Open the project in Android Studio, and it should build and run without any issues.
+```
+com.ashes.dev.works.ai.neural.brain.medha
+├── data/
+│   └── remote/
+│       └── GeminiApi.kt          # Retrofit interface + Gemini request/response models
+├── di/
+│   └── AppModule.kt              # Koin dependency injection
+├── domain/
+│   └── model/
+│       ├── AppMode.kt            # Offline/Online sealed class
+│       ├── ChatState.kt          # UI state holder
+│       ├── LogEntry.kt           # Log entry + severity levels
+│       ├── Message.kt            # Chat message with image support
+│       ├── ModelInfo.kt          # Offline model file metadata
+│       ├── ModelStatus.kt        # Model lifecycle states
+│       ├── PromptTemplate.kt     # 22 prompt templates + categories
+│       └── User.kt               # User enum (Human/AI)
+├── presentation/
+│   ├── navigation/
+│   │   └── NavGraph.kt           # Navigation with animated transitions
+│   └── screens/
+│       ├── about/
+│       │   └── AboutScreen.kt    # App guide and documentation
+│       ├── chat/
+│       │   ├── ChatScreen.kt     # Main chat UI with image picker
+│       │   └── ChatViewModel.kt  # Dual-mode chat logic
+│       ├── logs/
+│       │   └── LogsScreen.kt     # Real-time log viewer
+│       └── settings/
+│           └── SettingsScreen.kt # Mode, API key, model selection
+├── ui/theme/
+│   ├── Color.kt                  # Premium color palette
+│   ├── Theme.kt                  # Dark/light Material 3 themes
+│   └── Type.kt                   # Full typography system
+├── MainActivity.kt               # Entry point with edge-to-edge
+└── MedhaApplication.kt           # Koin initialization
+```
 
-## 🏗️ Project Structure
+## Contributing
 
-The project follows a standard Android MVVM architecture:
+Contributions are welcome! Open an issue or create a pull request.
 
--   **`com.ashes.dev.works.ai.neural.brain.medha`**
-    -   **`di`**: Contains the Koin dependency injection modules (`AppModule.kt`).
-    -   **`domain`**:
-        -   **`model`**: Defines the core data classes (`Message.kt`, `User.kt`, `ChatState.kt`).
-    -   **`presentation`**:
-        -   **`screens.chat`**: Contains the UI (`ChatScreen.kt`) and the `ChatViewModel.kt`.
-    -   **`ui.theme`**: Standard Jetpack Compose theme files.
-    -   **`MainActivity.kt`**: The main entry point of the application.
-    -   **`MedhaApplication.kt`**: The custom `Application` class where Koin is initialized.
+## License
 
-## 🤝 Contributing
-
-Contributions are welcome! If you find any issues or have suggestions for improvements, please open an issue or create a pull request.
-
-## 📄 License
-
-This project is licensed under the MIT License. See the `LICENSE` file for more details.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
