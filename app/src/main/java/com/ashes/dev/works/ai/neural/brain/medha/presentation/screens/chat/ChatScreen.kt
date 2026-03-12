@@ -47,11 +47,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -103,7 +105,6 @@ import com.ashes.dev.works.ai.neural.brain.medha.domain.model.PromptTemplate
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.PromptTemplates
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.TemplateCategory
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.User
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import com.ashes.dev.works.ai.neural.brain.medha.ui.theme.AccentCyan
 import com.ashes.dev.works.ai.neural.brain.medha.ui.theme.AccentGold
 import com.ashes.dev.works.ai.neural.brain.medha.ui.theme.AccentGreen
@@ -179,6 +180,9 @@ fun ChatScreen(
             onSelectCustom = { custom -> viewModel.requestActivateCustomGrandMaster(custom) },
             onCreateNew = { viewModel.hideGrandMasterPicker(); viewModel.showCreateGrandMaster() },
             onDeleteCustom = { id -> viewModel.deleteCustomGrandMaster(id) },
+            onExportCustom = { id -> viewModel.exportCustomGrandMaster(id) },
+            onExportAll = { viewModel.exportAllCustomGrandMasters() },
+            onImportFromUri = { uri -> viewModel.importGrandMastersFromUri(uri) },
             activeGrandMaster = uiState.activeGrandMaster,
             activeCustomGrandMaster = uiState.activeCustomGrandMaster,
             customGrandMasters = uiState.customGrandMasters
@@ -522,11 +526,19 @@ private fun GrandMasterPickerSheet(
     onSelectCustom: (CustomGrandMaster) -> Unit,
     onCreateNew: () -> Unit,
     onDeleteCustom: (String) -> Unit,
+    onExportCustom: (String) -> Unit,
+    onExportAll: () -> Unit,
+    onImportFromUri: (Uri) -> Unit,
     activeGrandMaster: GrandMaster?,
     activeCustomGrandMaster: CustomGrandMaster?,
     customGrandMasters: List<CustomGrandMaster>
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { onImportFromUri(it) }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -535,18 +547,25 @@ private fun GrandMasterPickerSheet(
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     ) {
         Column(modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
-            Text(
-                "Grand Masters",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                "Start a specialized AI session with deep expertise",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        "Grand Masters",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        "Start a specialized AI session with deep expertise",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    )
+                }
+            }
             Spacer(modifier = Modifier.height(16.dp))
 
             LazyColumn(modifier = Modifier.weight(1f, fill = false)) {
@@ -594,12 +613,13 @@ private fun GrandMasterPickerSheet(
                             isActive = isActive,
                             isCustom = true,
                             onClick = { if (!isActive) onSelectCustom(custom) },
-                            onDelete = { onDeleteCustom(custom.id) }
+                            onDelete = { onDeleteCustom(custom.id) },
+                            onExport = { onExportCustom(custom.id) }
                         )
                     }
                 }
 
-                // Create new button
+                // Action buttons
                 item {
                     Spacer(modifier = Modifier.height(12.dp))
                     Surface(
@@ -624,6 +644,48 @@ private fun GrandMasterPickerSheet(
                             )
                         }
                     }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        // Import button
+                        Surface(
+                            onClick = { importLauncher.launch("application/json") },
+                            shape = RoundedCornerShape(12.dp),
+                            color = AccentCyan.copy(alpha = 0.1f),
+                            border = BorderStroke(1.dp, AccentCyan.copy(alpha = 0.3f)),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Text("\uD83D\uDCE5", fontSize = 16.sp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Import", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = AccentCyan)
+                            }
+                        }
+                        // Export All button
+                        if (customGrandMasters.isNotEmpty()) {
+                            Surface(
+                                onClick = onExportAll,
+                                shape = RoundedCornerShape(12.dp),
+                                color = AccentGold.copy(alpha = 0.1f),
+                                border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.3f)),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Text("\uD83D\uDCE4", fontSize = 16.sp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Export All", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = AccentGold)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -639,7 +701,8 @@ private fun GrandMasterCard(
     isActive: Boolean,
     isCustom: Boolean = false,
     onClick: () -> Unit,
-    onDelete: (() -> Unit)? = null
+    onDelete: (() -> Unit)? = null,
+    onExport: (() -> Unit)? = null
 ) {
     Surface(
         onClick = onClick,
@@ -713,9 +776,16 @@ private fun GrandMasterCard(
                     )
                 }
             }
-            if (onDelete != null && !isActive) {
-                IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Default.Delete, "Delete", modifier = Modifier.size(18.dp), tint = StatusError.copy(alpha = 0.6f))
+            if (isCustom) {
+                if (onExport != null) {
+                    IconButton(onClick = onExport, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Share, "Export", modifier = Modifier.size(18.dp), tint = AccentCyan.copy(alpha = 0.7f))
+                    }
+                }
+                if (onDelete != null && !isActive) {
+                    IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Delete, "Delete", modifier = Modifier.size(18.dp), tint = StatusError.copy(alpha = 0.6f))
+                    }
                 }
             }
         }

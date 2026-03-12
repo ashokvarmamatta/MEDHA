@@ -2,6 +2,7 @@ package com.ashes.dev.works.ai.neural.brain.medha.presentation.screens.chat
 
 import android.app.Application
 import android.content.ContentValues
+import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
@@ -42,6 +43,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 import org.json.JSONObject
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -669,6 +671,102 @@ class ChatViewModel(
             }
             settingsRepository.saveCustomGrandMasters(_uiState.value.customGrandMasters)
             addLog(LogLevel.INFO, TAG, "Deleted custom Grand Master: ${custom?.title}")
+        }
+    }
+
+    /** Export a single custom Grand Master as JSON via share intent */
+    fun exportCustomGrandMaster(id: String) {
+        val custom = _uiState.value.customGrandMasters.find { it.id == id } ?: return
+        val json = JSONObject().apply {
+            put("icon", custom.icon)
+            put("title", custom.title)
+            put("subtitle", custom.subtitle)
+            put("description", custom.description)
+            put("systemPrompt", custom.systemPrompt)
+            put("welcomeMessage", custom.welcomeMessage)
+        }.toString(2)
+
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/json"
+            putExtra(Intent.EXTRA_TEXT, json)
+            putExtra(Intent.EXTRA_SUBJECT, "MEDHA Grand Master: ${custom.title}")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        application.startActivity(Intent.createChooser(intent, "Export Grand Master").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        addLog(LogLevel.INFO, TAG, "Exported Grand Master: ${custom.title}")
+    }
+
+    /** Export all custom Grand Masters as a JSON array via share intent */
+    fun exportAllCustomGrandMasters() {
+        val masters = _uiState.value.customGrandMasters
+        if (masters.isEmpty()) return
+        val arr = JSONArray()
+        for (gm in masters) {
+            arr.put(JSONObject().apply {
+                put("icon", gm.icon)
+                put("title", gm.title)
+                put("subtitle", gm.subtitle)
+                put("description", gm.description)
+                put("systemPrompt", gm.systemPrompt)
+                put("welcomeMessage", gm.welcomeMessage)
+            })
+        }
+        val json = arr.toString(2)
+
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/json"
+            putExtra(Intent.EXTRA_TEXT, json)
+            putExtra(Intent.EXTRA_SUBJECT, "MEDHA Grand Masters (${masters.size})")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        application.startActivity(Intent.createChooser(intent, "Export All Grand Masters").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        addLog(LogLevel.INFO, TAG, "Exported ${masters.size} Grand Masters")
+    }
+
+    /** Import Grand Masters from JSON text - supports single object or array */
+    fun importGrandMastersFromJson(jsonText: String) {
+        try {
+            val trimmed = jsonText.trim()
+            if (trimmed.startsWith("[")) {
+                // Array of Grand Masters
+                val arr = JSONArray(trimmed)
+                var imported = 0
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    createCustomGrandMaster(
+                        icon = obj.optString("icon", "\uD83C\uDF1F"),
+                        title = obj.getString("title"),
+                        subtitle = obj.optString("subtitle", ""),
+                        description = obj.optString("description", ""),
+                        systemPrompt = obj.getString("systemPrompt"),
+                        welcomeMessage = obj.optString("welcomeMessage", "")
+                    )
+                    imported++
+                }
+                addLog(LogLevel.INFO, TAG, "Imported $imported Grand Masters from JSON array")
+            } else {
+                // Single Grand Master
+                createCustomGrandMasterFromJson(trimmed)
+            }
+        } catch (e: Exception) {
+            addLog(LogLevel.ERROR, TAG, "Import failed: ${e.message}")
+            _uiState.update { it.copy(apiKeyTestResult = "Import failed: ${e.message?.take(80)}") }
+        }
+    }
+
+    /** Import Grand Masters from a file URI */
+    fun importGrandMastersFromUri(uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val text = application.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                if (text.isNullOrBlank()) {
+                    addLog(LogLevel.ERROR, TAG, "Import file is empty")
+                    return@launch
+                }
+                importGrandMastersFromJson(text)
+            } catch (e: Exception) {
+                addLog(LogLevel.ERROR, TAG, "Failed to read import file: ${e.message}")
+            }
         }
     }
 
