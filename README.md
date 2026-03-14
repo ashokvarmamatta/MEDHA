@@ -5,7 +5,7 @@
 **Privacy-first AI chat that runs entirely on your phone. No internet, no data collection, no servers. Powered by MediaPipe + Gemma for true offline intelligence — with optional Gemini cloud API for enhanced capabilities.**
 
 [![Android](https://img.shields.io/badge/Platform-Android%2024%2B-green?logo=android)](https://developer.android.com)
-[![Kotlin](https://img.shields.io/badge/Language-Kotlin-purple?logo=kotlin)](https://kotlinlang.org)
+[![Kotlin](https://img.shields.io/badge/Language-Kotlin%202.2-purple?logo=kotlin)](https://kotlinlang.org)
 [![Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-blue?logo=jetpack-compose)](https://developer.android.com/compose)
 [![MediaPipe](https://img.shields.io/badge/Offline_AI-MediaPipe_GenAI-orange?logo=google)](https://ai.google.dev/edge/mediapipe/solutions/genai/llm_inference)
 [![Gemini](https://img.shields.io/badge/Online_AI-Gemini_API-4285F4?logo=google)](https://ai.google.dev)
@@ -45,22 +45,45 @@ You -> Type a message / Upload an image
 
 ---
 
+## Screenshots
+
+<div align="center">
+<img src="screensots/image_17.png" alt="Medha Screenshot" width="300"/>
+</div>
+
+---
+
 ## Core Features
 
 ### Offline AI Chat (Primary)
 - **On-device LLM** — Gemma 2B runs via MediaPipe GenAI Tasks. Your data stays on your phone
 - **Zero internet required** — Works in airplane mode, no server, no cloud
 - **Private by design** — No data collection, no telemetry, no accounts
-- Auto-scans Downloads folder for `.bin` model files
+- **SAF-based model import** — Import `.bin` model files using Android's native file picker (no storage permissions needed)
+- **Foreground service** — Keeps the model loaded in the background with wake lock for reliable inference
+- **Smart context management** — Prevents topic bleeding by limiting history to recent exchanges with system prompt injection
+- **Response cleaning** — Strips duplicate turn markers and special tokens for clean output
 - Conversation history preserved within Grand Master sessions
 
 ### Online AI Chat (Secondary)
 - **Google Gemini API** — Connect for faster, more capable responses when needed
 - **Multi-API key management** — Add multiple keys with labels, validation, and automatic failover
-- **Image analysis** — Upload images for AI-powered description, OCR, and analysis
-- **Image generation** — AI-generated images with save-to-gallery
-- **Model selection** — Browse and pick from available Gemini models
+- **Per-key model checking** — Test which models work with each individual API key
+- **cURL paste mode** — Paste API keys from cURL commands or enter them directly, with base URL support
+- **Enable/disable keys** — Toggle individual keys on or off without removing them
+- **Key reordering** — Set priority order for failover; drag to reorder keys
+- **Image analysis** — Upload images for AI-powered description, OCR, and analysis with 5 response styles
+- **Image generation** — AI-generated images via capable Gemini models with save-to-gallery
+- **Model selection** — Browse and pick from available Gemini models per key
 - Switch between offline and online seamlessly from Settings
+
+### Image Response Styles (Online)
+When analyzing images, choose from 5 response styles:
+- **Short** — 2-3 sentence summary
+- **Detailed** — Thorough analysis
+- **Full** — Comprehensive coverage
+- **Bullet Points** — Organized list format
+- **Technical** — Precise terminology
 
 ---
 
@@ -97,6 +120,12 @@ You can **create custom Grand Masters** with your own rules, personality, and ex
 ```
 
 The `systemPrompt` is the most important field — it defines **exactly how the Grand Master behaves**, what rules it follows, what expertise it has, and how it responds.
+
+### Export & Import Grand Masters
+
+- **Export** custom Grand Masters as JSON to share with others
+- **Import** Grand Masters from JSON files to quickly set up new personas
+- Share your custom Grand Masters across devices or with the community
 
 ### Chat Persistence
 
@@ -136,7 +165,7 @@ The `systemPrompt` is the most important field — it defines **exactly how the 
 | Screen | Purpose |
 |--------|---------|
 | **Chat** | Main conversation with input bar, image picker, templates, Grand Master header |
-| **Settings** | Mode toggle, API key management with test/validate, model picker, status panel |
+| **Settings** | Mode toggle, API key management with test/validate, model picker, model sources & API provider links |
 | **Logs** | Real-time engine log viewer with color-coded severity levels |
 | **About** | App guide, feature list, setup instructions, privacy info |
 
@@ -144,7 +173,7 @@ The `systemPrompt` is the most important field — it defines **exactly how the 
 
 ## Architecture
 
-MEDHA follows **MVVM** architecture with **Koin** dependency injection.
+MEDHA follows **MVVM** architecture with **Koin** dependency injection and reactive **StateFlow** state management.
 
 ```
 app/src/main/java/com/ashes/dev/works/ai/neural/brain/medha/
@@ -167,7 +196,7 @@ app/src/main/java/com/ashes/dev/works/ai/neural/brain/medha/
 |   +-- Message.kt                           # Chat message with UUID, imageUri
 |   +-- GrandMaster.kt                       # Built-in Grand Master enum (4 experts)
 |   +-- CustomGrandMaster.kt                 # User-created Grand Master data class
-|   +-- ApiKeyEntry.kt                       # API key with validation state
+|   +-- ApiKeyEntry.kt                       # API key with validation state & per-key model checking
 |   +-- ModelInfo.kt                         # Offline model file metadata
 |   +-- ModelStatus.kt                       # Sealed: Idle -> Initializing -> Ready -> Error
 |   +-- PromptTemplate.kt                    # 22 templates + categories
@@ -178,12 +207,15 @@ app/src/main/java/com/ashes/dev/works/ai/neural/brain/medha/
 |   |   +-- NavGraph.kt                      # 4 routes with animated transitions
 |   +-- screens/
 |       +-- chat/
-|       |   +-- ChatScreen.kt                # Chat UI, Grand Master picker, create GM sheet
-|       |   +-- ChatViewModel.kt             # Dual-mode logic, GM management, chat persistence
+|       |   +-- ChatScreen.kt               # Chat UI, Grand Master picker, create GM sheet
+|       |   +-- ChatViewModel.kt            # Dual-mode logic, GM management, chat persistence
 |       +-- settings/
 |       |   +-- SettingsScreen.kt            # API keys, model selection, mode toggle
 |       +-- about/AboutScreen.kt
 |       +-- logs/LogsScreen.kt
+|
++-- service/
+|   +-- MedhaService.kt                      # Foreground service with wake lock for offline model
 |
 +-- ui/theme/
     +-- Color.kt, Theme.kt, Type.kt
@@ -197,7 +229,7 @@ app/src/main/java/com/ashes/dev/works/ai/neural/brain/medha/
 - Android Studio Ladybug or newer
 - JDK 21+
 - Android device or emulator running **Android 7.0 (API 24)+**
-- For offline mode: a compatible Gemma model file
+- For offline mode: a compatible Gemma model file (`.bin`)
 - For online mode: a Google Gemini API key (free)
 
 ### Build & Run
@@ -227,27 +259,23 @@ cd MEDHA
    - Source: [Kaggle — Google Gemma](https://www.kaggle.com/models/google/gemma/frameworks/gemma-cpp)
    - Download the GPU-compatible `int4` variant for best mobile performance
 
-2. **Push the model to your device**
-   ```bash
-   adb push gemma-2b-it-gpu-int4.bin /storage/emulated/0/Download/
-   ```
+2. **Import the model** — Open MEDHA Settings and use the **Import Model** button to select your `.bin` file using Android's file picker (SAF). No storage permissions required.
 
-3. **Grant storage permission** — On first launch, allow "All Files Access" when prompted
+3. **Select the model** — The app will detect the imported model automatically
 
-4. **Select the model** — The app auto-scans your Downloads folder for `.bin` model files
-
-5. **Start chatting** — The model loads in ~10-30 seconds depending on your device
+4. **Start chatting** — The model loads in ~10-30 seconds depending on your device
 
 ### Online Mode (Secondary — Gemini API)
 
 1. **Get a free API key** from [Google AI Studio](https://aistudio.google.com/apikey)
 2. Open **MEDHA -> Settings**
 3. Switch to **Online** mode
-4. Add your **Gemini API key** with an optional label
-5. **Test & validate** the key — the app will fetch available models
-6. Start chatting — responses come from Gemini API
+4. Add your **Gemini API key** — paste directly or use **cURL paste mode** to extract from a cURL command
+5. **Test & validate** the key — the app will fetch available models and check per-key compatibility
+6. Optionally add **multiple API keys** for automatic failover
+7. Start chatting — responses come from Gemini API
 
-> **Multi-key support:** Add multiple API keys. If one key hits a rate limit, MEDHA automatically fails over to the next validated key.
+> **Multi-key support:** Add multiple API keys with priority ordering. If one key hits a rate limit (429/500/503), MEDHA automatically fails over to the next validated key and tries alternate models.
 
 ---
 
@@ -255,17 +283,18 @@ cd MEDHA
 
 | Layer | Technology |
 |---|---|
-| **Language** | Kotlin |
-| **UI** | Jetpack Compose + Material Design 3 |
+| **Language** | Kotlin 2.2 |
+| **UI** | Jetpack Compose (BOM 2025.12) + Material Design 3 |
 | **Architecture** | MVVM + StateFlow |
-| **Offline AI** | MediaPipe GenAI Tasks (`tasks-genai:0.10.14`) — Gemma 2B |
-| **Online AI** | Google Gemini REST API |
-| **Networking** | Retrofit + OkHttp + Moshi |
-| **Image Loading** | Coil (Compose integration) |
-| **Navigation** | Jetpack Navigation Compose (animated transitions) |
-| **DI** | Koin |
+| **Offline AI** | MediaPipe GenAI Tasks (`tasks-genai:0.10.29`) — Gemma 2B |
+| **Online AI** | Google Gemini REST API (v1beta) |
+| **Networking** | Retrofit 3.0 + OkHttp 5.3 + Moshi 1.15 |
+| **Image Loading** | Coil 2.7 (Compose integration) |
+| **Navigation** | Jetpack Navigation Compose 2.9 (animated transitions) |
+| **DI** | Koin 4.1 |
 | **Storage** | DataStore Preferences (API keys, chat history, custom GMs) |
 | **Permissions** | Accompanist Permissions |
+| **Background** | Foreground Service + Wake Lock |
 | **Build** | Gradle KTS + KSP |
 | **Min SDK** | 24 (Android 7.0) |
 | **Target SDK** | 36 |
@@ -284,7 +313,6 @@ cd MEDHA
 - [ ] Export chat — share or save conversations as text/PDF
 - [ ] Multi-image support — send multiple images in a single message
 - [ ] Camera capture — take photos directly from the app for analysis
-- [ ] Grand Master import/export — share custom Grand Masters with others
 
 ### Quality of Life
 - [ ] Chat search — search through message history
@@ -297,6 +325,20 @@ cd MEDHA
 - [ ] Function calling / tool use — let the AI interact with device features
 - [ ] Plugin system — extensible prompt templates and tools
 - [ ] Tablet / foldable optimization — adaptive layouts for large screens
+
+### Recently Completed
+- [x] SAF-based offline model import (no storage permissions needed)
+- [x] Foreground service with wake lock for offline model
+- [x] Offline response cleaning & topic bleeding prevention
+- [x] Per-key model checking & multi-model failover
+- [x] cURL paste mode & base URL support for API keys
+- [x] Enable/disable toggle for individual API keys
+- [x] API key reordering for failover priority
+- [x] Grand Master export/import as JSON
+- [x] Grand Master chat persistence with resume/reset
+- [x] Custom Grand Master creation (form + JSON modes)
+- [x] Image response styles (5 modes)
+- [x] Model sources & API provider links in Settings
 
 ---
 
