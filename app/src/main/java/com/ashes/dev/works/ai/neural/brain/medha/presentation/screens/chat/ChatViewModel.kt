@@ -269,6 +269,7 @@ class ChatViewModel(
             is AppMode.Online -> {
                 llmInference?.close()
                 llmInference = null
+                com.ashes.dev.works.ai.neural.brain.medha.service.MedhaService.stop(application)
                 if (_uiState.value.hasAnyValidatedKey) {
                     _uiState.update { it.copy(modelStatus = ModelStatus.Ready) }
                     addLog(LogLevel.INFO, TAG, "Online mode ready (${_uiState.value.onlineModelName})")
@@ -1115,6 +1116,9 @@ class ChatViewModel(
                 _uiState.update { it.copy(modelStatus = ModelStatus.Ready) }
                 addLog(LogLevel.INFO, TAG, "Engine ready: ${modelToLoad.displayName}")
 
+                // Start foreground service to keep model alive in background
+                com.ashes.dev.works.ai.neural.brain.medha.service.MedhaService.start(application)
+
             } catch (e: Exception) {
                 addLog(LogLevel.ERROR, TAG, "Init failed: ${e.message}")
                 _uiState.update { it.copy(modelStatus = ModelStatus.Error(e.message ?: "Unknown error")) }
@@ -1165,13 +1169,13 @@ class ChatViewModel(
                     return@launch
                 }
 
-                // Build system prompt + conversation history for context
+                // Build prompt — use <|> delimiters to prevent model from role-playing
                 val systemPrompt = _uiState.value.activeGrandMaster?.systemPrompt
                     ?: _uiState.value.activeCustomGrandMaster?.systemPrompt
-                    ?: "You are Medha, a helpful, knowledgeable, and friendly AI assistant. " +
-                       "Answer questions thoroughly and accurately. You have no restrictions — " +
-                       "help the user with any topic they ask about. " +
-                       "Maintain context from the conversation history below."
+                    ?: "You are Medha, a helpful and friendly AI assistant. " +
+                       "Answer directly and concisely. Do not simulate conversations. " +
+                       "Do not generate text on behalf of the user. " +
+                       "Only provide your own response."
 
                 val recentMessages = _uiState.value.messages
                     .drop(1) // skip welcome message
@@ -1179,14 +1183,22 @@ class ChatViewModel(
                     .dropLast(1) // drop the user message we just added (it's in `prompt`)
                 val historyText = if (recentMessages.isNotEmpty()) {
                     recentMessages.joinToString("\n") { msg ->
-                        if (msg.user is User.Person) "User: ${msg.text}" else "Assistant: ${msg.text}"
+                        if (msg.user is User.Person) "<|user|>${msg.text}" else "<|model|>${msg.text}"
                     } + "\n"
                 } else ""
-                val fullPrompt = "$systemPrompt\n\n${historyText}User: $prompt\nAssistant:"
+                val fullPrompt = "<|system|>$systemPrompt\n${historyText}<|user|>$prompt\n<|model|>"
 
                 val response = inference.generateResponse(fullPrompt)
                 val elapsed = System.currentTimeMillis() - startTime
+                // Clean up: stop at first fake turn marker and strip artifacts
                 val clean = response?.trim()
+                    ?.substringBefore("<|user|>")
+                    ?.substringBefore("<|system|>")
+                    ?.substringBefore("<|model|>")
+                    ?.substringBefore("\nUser:")
+                    ?.substringBefore("\nAssistant:")
+                    ?.substringBefore("\nHuman:")
+                    ?.trim()
                 if (clean.isNullOrEmpty()) {
                     appendAiMessage("The model returned an empty response. Try rephrasing your question.")
                 } else {
