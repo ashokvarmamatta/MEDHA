@@ -262,7 +262,9 @@ class ChatViewModel(
             val updated = it.apiKeys.filter { entry -> entry.id != id }
             it.copy(
                 apiKeys = updated,
-                activeKeyIndex = it.activeKeyIndex.coerceIn(0, (updated.size - 1).coerceAtLeast(0))
+                activeKeyIndex = it.activeKeyIndex.coerceIn(0, (updated.size - 1).coerceAtLeast(0)),
+                // Clear models when all keys are removed
+                onlineAvailableModels = if (updated.isEmpty()) emptyList() else it.onlineAvailableModels
             )
         }
         saveKeys()
@@ -273,6 +275,35 @@ class ChatViewModel(
             _uiState.update { it.copy(modelStatus = ModelStatus.Error("No validated API keys. Test in Settings.")) }
         }
         addLog(LogLevel.INFO, TAG, "Removed API key")
+    }
+
+    fun moveApiKey(id: String, direction: Int) {
+        _uiState.update { state ->
+            val keys = state.apiKeys.toMutableList()
+            val fromIndex = keys.indexOfFirst { it.id == id }
+            if (fromIndex < 0) return@update state
+            val toIndex = fromIndex + direction
+            if (toIndex < 0 || toIndex >= keys.size) return@update state
+            // Swap
+            val temp = keys[fromIndex]
+            keys[fromIndex] = keys[toIndex]
+            keys[toIndex] = temp
+            state.copy(apiKeys = keys)
+        }
+        saveKeys()
+        syncActiveModel()
+    }
+
+    /** Update onlineModelName to reflect the first selected model of the highest-priority validated key */
+    private fun syncActiveModel() {
+        _uiState.update { state ->
+            val firstKey = state.apiKeys.firstOrNull { it.isValidated && it.selectedModels.isNotEmpty() }
+            val activeModel = firstKey?.selectedModels?.firstOrNull()
+            if (activeModel != null && activeModel != state.onlineModelName) {
+                state.copy(onlineModelName = activeModel, activeKeyIndex = 0)
+            } else state
+        }
+        saveModel()
     }
 
     fun fetchOnlineModels(apiKey: String) {
@@ -330,11 +361,15 @@ class ChatViewModel(
 
     fun testApiKey(keyId: String) {
         val entry = _uiState.value.apiKeys.find { it.id == keyId } ?: return
+        // Prevent testing if this key is already being tested
+        if (_uiState.value.isTestingKeyId == keyId) return
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 _uiState.update { it.copy(isTestingKeyId = keyId, apiKeyTestResult = "Testing ${entry.label}...") }
-                val modelName = _uiState.value.onlineModelName
+
+                // Use a default model if none selected yet
+                val modelName = _uiState.value.onlineModelName.ifBlank { "gemini-2.0-flash" }
 
                 addLog(LogLevel.INFO, TAG, "Testing ${entry.label} with model: $modelName")
 
@@ -382,6 +417,193 @@ class ChatViewModel(
                 saveKeys()
             }
         }
+    }
+
+    fun checkAllModels(keyId: String) {
+        val entry = _uiState.value.apiKeys.find { it.id == keyId } ?: return
+        if (_uiState.value.checkingAllModelsKeyId != null) return
+
+        val models = _uiState.value.onlineAvailableModels
+        if (models.isEmpty()) {
+            _uiState.update { it.copy(apiKeyTestResult = "No models loaded. Add a key & fetch models first.") }
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val api = geminiApi ?: run {
+                _uiState.update { it.copy(apiKeyTestResult = "API client error") }
+                return@launch
+            }
+
+            // Initialize progress: all models pending (null = pending)
+            val initialProgress = models.associate { it.modelId to null as String? }
+            _uiState.update { it.copy(checkingAllModelsKeyId = keyId, modelCheckProgress = initialProgress) }
+            addLog(LogLevel.INFO, TAG, "Checking ${models.size} models for ${entry.label}...")
+
+            // checkedResults: null = pass, non-null string = error message
+            val checkedResults = mutableMapOf<String, String?>()
+            val passedModels = mutableListOf<String>()
+
+            for (model in models) {
+                try {
+                    val request = GeminiRequest(
+                        contents = listOf(
+                            GeminiContent(role = "user", parts = listOf(GeminiPart(text = "Hi")))
+                        ),
+                        generationConfig = GenerationConfig(maxOutputTokens = 5, temperature = 0.1f)
+                    )
+                    val response = api.generateContent(model.modelId, entry.key, request)
+
+                    if (response.error != null) {
+                        val errMsg = response.error.message ?: "Error code: ${response.error.code}"
+                        checkedResults[model.modelId] = errMsg
+                        _uiState.update {
+                            it.copy(modelCheckProgress = it.modelCheckProgress + (model.modelId to errMsg))
+                        }
+                        addLog(LogLevel.WARNING, TAG, "${model.modelId}: FAIL - $errMsg")
+                    } else if (response.candidates.isNullOrEmpty() ||
+                        response.candidates.firstOrNull()?.content?.parts?.firstOrNull()?.text == null) {
+                        val errMsg = "Empty response"
+                        checkedResults[model.modelId] = errMsg
+                        _uiState.update {
+                            it.copy(modelCheckProgress = it.modelCheckProgress + (model.modelId to errMsg))
+                        }
+                        addLog(LogLevel.WARNING, TAG, "${model.modelId}: FAIL - Empty response")
+                    } else {
+                        checkedResults[model.modelId] = null // null = success
+                        passedModels.add(model.modelId)
+                        _uiState.update {
+                            it.copy(modelCheckProgress = it.modelCheckProgress + (model.modelId to ""))  // empty = pass in progress
+                        }
+                        addLog(LogLevel.INFO, TAG, "${model.modelId}: PASS")
+                    }
+                } catch (e: Exception) {
+                    val errMsg = e.message?.take(80) ?: "Unknown error"
+                    checkedResults[model.modelId] = errMsg
+                    _uiState.update {
+                        it.copy(modelCheckProgress = it.modelCheckProgress + (model.modelId to errMsg))
+                    }
+                    addLog(LogLevel.WARNING, TAG, "${model.modelId}: FAIL - ${e.message?.take(50)}")
+                }
+            }
+
+            // Save results — auto-select all passing models
+            _uiState.update { state ->
+                state.copy(
+                    apiKeys = state.apiKeys.map {
+                        if (it.id == keyId) it.copy(
+                            checkedModels = checkedResults,
+                            selectedModels = passedModels,
+                            isValidated = passedModels.isNotEmpty(),
+                            lastError = if (passedModels.isEmpty()) "No models passed" else null
+                        ) else it
+                    },
+                    checkingAllModelsKeyId = null,
+                    modelCheckProgress = emptyMap(),
+                    apiKeyTestResult = "${passedModels.size}/${models.size} models working for ${entry.label}",
+                    modelStatus = if (passedModels.isNotEmpty()) ModelStatus.Ready else _uiState.value.modelStatus
+                )
+            }
+            saveKeys()
+            syncActiveModel()
+            addLog(LogLevel.INFO, TAG, "Check complete: ${passedModels.size}/${models.size} passed for ${entry.label}")
+        }
+    }
+
+    fun testSingleModel(keyId: String, modelId: String) {
+        val entry = _uiState.value.apiKeys.find { it.id == keyId } ?: return
+        val testingKey = "$keyId:$modelId"
+        if (_uiState.value.testingSingleModel == testingKey) return
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                _uiState.update { it.copy(testingSingleModel = testingKey) }
+                addLog(LogLevel.INFO, TAG, "Testing $modelId for ${entry.label}...")
+
+                val api = geminiApi ?: run {
+                    _uiState.update { it.copy(testingSingleModel = null, apiKeyTestResult = "API client error") }
+                    return@launch
+                }
+
+                val request = GeminiRequest(
+                    contents = listOf(
+                        GeminiContent(role = "user", parts = listOf(GeminiPart(text = "Hi")))
+                    ),
+                    generationConfig = GenerationConfig(maxOutputTokens = 5, temperature = 0.1f)
+                )
+
+                val response = api.generateContent(modelId, entry.key, request)
+
+                val errorMsg: String? = when {
+                    response.error != null -> response.error.message ?: "Error code: ${response.error.code}"
+                    response.candidates.isNullOrEmpty() -> "Empty response"
+                    response.candidates.firstOrNull()?.content?.parts?.firstOrNull()?.text == null -> "Empty response"
+                    else -> null // success
+                }
+
+                _uiState.update { state ->
+                    state.copy(
+                        apiKeys = state.apiKeys.map {
+                            if (it.id == keyId) {
+                                val updatedChecked = it.checkedModels + (modelId to errorMsg)
+                                val updatedSelected = if (errorMsg == null && modelId !in it.selectedModels) {
+                                    it.selectedModels + modelId
+                                } else if (errorMsg != null) {
+                                    it.selectedModels - modelId
+                                } else it.selectedModels
+                                it.copy(
+                                    checkedModels = updatedChecked,
+                                    selectedModels = updatedSelected,
+                                    isValidated = updatedSelected.isNotEmpty() || it.isValidated
+                                )
+                            } else it
+                        },
+                        testingSingleModel = null,
+                        apiKeyTestResult = if (errorMsg == null) "$modelId working for ${entry.label}" else "$modelId failed: $errorMsg",
+                        modelStatus = if (errorMsg == null) ModelStatus.Ready else _uiState.value.modelStatus
+                    )
+                }
+                saveKeys()
+                syncActiveModel()
+            } catch (e: Exception) {
+                val errMsg = e.message?.take(80) ?: "Unknown error"
+                _uiState.update { state ->
+                    state.copy(
+                        apiKeys = state.apiKeys.map {
+                            if (it.id == keyId) {
+                                it.copy(
+                                    checkedModels = it.checkedModels + (modelId to errMsg),
+                                    selectedModels = it.selectedModels - modelId
+                                )
+                            } else it
+                        },
+                        testingSingleModel = null,
+                        apiKeyTestResult = "$modelId failed: $errMsg"
+                    )
+                }
+                saveKeys()
+                syncActiveModel()
+            }
+        }
+    }
+
+    fun toggleModelForKey(keyId: String, modelId: String) {
+        _uiState.update { state ->
+            state.copy(
+                apiKeys = state.apiKeys.map { entry ->
+                    if (entry.id == keyId) {
+                        val updated = if (modelId in entry.selectedModels) {
+                            entry.selectedModels - modelId
+                        } else {
+                            entry.selectedModels + modelId
+                        }
+                        entry.copy(selectedModels = updated)
+                    } else entry
+                }
+            )
+        }
+        saveKeys()
+        syncActiveModel()
     }
 
     private fun updateKeyState(keyId: String, isValidated: Boolean, lastError: String?) {
@@ -1047,42 +1269,60 @@ class ChatViewModel(
         val startIndex = _uiState.value.activeKeyIndex.coerceIn(0, validKeys.lastIndex)
         val errors = mutableListOf<String>()
 
+        // Build list of (keyIndex, modelId) pairs to try
+        // For each key: try its selectedModels (starting with the requested modelName), then fall back
+        val attempts = mutableListOf<Pair<Int, String>>()
         for (i in validKeys.indices) {
             val idx = (startIndex + i) % validKeys.size
             val entry = validKeys[idx]
+            val keyModels = if (entry.selectedModels.isNotEmpty()) {
+                // Put the requested model first if it's in selectedModels, then others
+                val ordered = mutableListOf<String>()
+                if (modelName in entry.selectedModels) ordered.add(modelName)
+                ordered.addAll(entry.selectedModels.filter { it != modelName })
+                ordered
+            } else {
+                listOf(modelName)
+            }
+            for (model in keyModels) {
+                attempts.add(idx to model)
+            }
+        }
+
+        for ((idx, tryModel) in attempts) {
+            val entry = validKeys[idx]
             try {
-                addLog(LogLevel.DEBUG, TAG, "Trying ${entry.label}...")
-                val response = api.generateContent(modelName, entry.key, request)
+                addLog(LogLevel.DEBUG, TAG, "Trying ${entry.label} with $tryModel...")
+                val response = api.generateContent(tryModel, entry.key, request)
 
                 if (response.error != null) {
                     val code = response.error.code
                     // Retryable errors: rate limit, server errors
                     if (code in listOf(429, 500, 503)) {
-                        errors.add("${entry.label}: ${response.error.message}")
-                        addLog(LogLevel.WARNING, TAG, "${entry.label} failed ($code), trying next key...")
-                        updateKeyState(entry.id, isValidated = true, lastError = "Error $code")
+                        errors.add("${entry.label}/$tryModel: ${response.error.message}")
+                        addLog(LogLevel.WARNING, TAG, "${entry.label}/$tryModel failed ($code), trying next...")
                         continue
                     }
                     // Non-retryable (400, 403, etc) — return as-is
-                    _uiState.update { it.copy(activeKeyIndex = idx) }
+                    _uiState.update { it.copy(activeKeyIndex = idx, onlineModelName = tryModel) }
                     return response
                 }
 
                 // Success
-                _uiState.update { it.copy(activeKeyIndex = idx) }
+                _uiState.update { it.copy(activeKeyIndex = idx, onlineModelName = tryModel) }
                 updateKeyState(entry.id, isValidated = true, lastError = null)
                 return response
 
             } catch (e: Exception) {
-                errors.add("${entry.label}: ${e.message?.take(60)}")
-                addLog(LogLevel.WARNING, TAG, "${entry.label} exception: ${e.message}, trying next...")
+                errors.add("${entry.label}/$tryModel: ${e.message?.take(60)}")
+                addLog(LogLevel.WARNING, TAG, "${entry.label}/$tryModel exception: ${e.message}, trying next...")
                 continue
             }
         }
 
-        // All keys exhausted
-        addLog(LogLevel.ERROR, TAG, "All ${validKeys.size} API keys exhausted")
-        appendAiMessage("All API keys exhausted:\n\n${errors.joinToString("\n") { "- $it" }}\n\nAdd more keys or wait for rate limits to reset.")
+        // All keys & models exhausted
+        addLog(LogLevel.ERROR, TAG, "All API keys and models exhausted")
+        appendAiMessage("All API keys and models exhausted:\n\n${errors.joinToString("\n") { "- $it" }}\n\nAdd more keys or wait for rate limits to reset.")
         return null
     }
 

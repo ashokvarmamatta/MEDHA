@@ -26,9 +26,13 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -295,9 +299,18 @@ fun SettingsScreen(
                             uiState.apiKeys.forEachIndexed { index, entry ->
                                 ApiKeyItem(
                                     entry = entry,
+                                    index = index,
+                                    totalKeys = uiState.apiKeys.size,
                                     isActive = uiState.activeKey?.id == entry.id,
                                     isTesting = uiState.isTestingKeyId == entry.id,
+                                    isCheckingAll = uiState.checkingAllModelsKeyId == entry.id,
+                                    modelCheckProgress = if (uiState.checkingAllModelsKeyId == entry.id) uiState.modelCheckProgress else emptyMap(),
+                                    hasModelsLoaded = uiState.onlineAvailableModels.isNotEmpty(),
                                     onTest = { viewModel.testApiKey(entry.id) },
+                                    onCheckAll = { viewModel.checkAllModels(entry.id) },
+                                    onToggleModel = { modelId -> viewModel.toggleModelForKey(entry.id, modelId) },
+                                    onMoveUp = { viewModel.moveApiKey(entry.id, -1) },
+                                    onMoveDown = { viewModel.moveApiKey(entry.id, 1) },
                                     onDelete = { viewModel.removeApiKey(entry.id) }
                                 )
                                 if (index < uiState.apiKeys.size - 1) {
@@ -328,6 +341,11 @@ fun SettingsScreen(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
 
+                        // Gather per-key status for each model across all keys
+                        val allKeyStatuses = uiState.apiKeys.associate { key ->
+                            key.id to key
+                        }
+
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
@@ -351,7 +369,10 @@ fun SettingsScreen(
                                         OnlineModelOption(
                                             model = model,
                                             isSelected = uiState.onlineModelName == model.modelId,
-                                            onClick = { viewModel.selectOnlineModel(model) }
+                                            apiKeys = uiState.apiKeys,
+                                            testingSingleModel = uiState.testingSingleModel,
+                                            onClick = { viewModel.selectOnlineModel(model) },
+                                            onTestForKey = { keyId -> viewModel.testSingleModel(keyId, model.modelId) }
                                         )
                                         if (index < recommended.size - 1) {
                                             HorizontalDivider(
@@ -380,7 +401,10 @@ fun SettingsScreen(
                                         OnlineModelOption(
                                             model = model,
                                             isSelected = uiState.onlineModelName == model.modelId,
-                                            onClick = { viewModel.selectOnlineModel(model) }
+                                            apiKeys = uiState.apiKeys,
+                                            testingSingleModel = uiState.testingSingleModel,
+                                            onClick = { viewModel.selectOnlineModel(model) },
+                                            onTestForKey = { keyId -> viewModel.testSingleModel(keyId, model.modelId) }
                                         )
                                         if (index < others.size - 1) {
                                             HorizontalDivider(
@@ -397,7 +421,7 @@ fun SettingsScreen(
                         if (uiState.apiKeys.isNotEmpty()) {
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
-                                "Test a key above to validate it for chatting.",
+                                "Select a model and use 'Test' on each key, or 'Check All Models' per key.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                             )
@@ -536,107 +560,403 @@ fun SettingsScreen(
 @Composable
 private fun ApiKeyItem(
     entry: ApiKeyEntry,
+    index: Int,
+    totalKeys: Int,
     isActive: Boolean,
     isTesting: Boolean,
+    isCheckingAll: Boolean,
+    modelCheckProgress: Map<String, String?>,
+    hasModelsLoaded: Boolean,
     onTest: () -> Unit,
+    onCheckAll: () -> Unit,
+    onToggleModel: (String) -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
     onDelete: () -> Unit
 ) {
-    Row(
+    var showModels by remember { mutableStateOf(false) }
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 4.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 4.dp, vertical = 10.dp)
+            .animateContentSize()
     ) {
-        // Status indicator
-        Box(
-            modifier = Modifier
-                .size(10.dp)
-                .border(
-                    width = 2.dp,
-                    color = if (entry.isValidated) StatusSuccess else if (entry.lastError != null) StatusError else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                    shape = RoundedCornerShape(50)
-                )
-        )
-
-        Spacer(modifier = Modifier.width(10.dp))
-
-        // Key info
-        Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    entry.label,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (entry.isValidated) StatusSuccess else MaterialTheme.colorScheme.onSurface
-                )
-                if (isActive && entry.isValidated) {
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = AccentCyan.copy(alpha = 0.15f)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Priority reorder arrows (only show when multiple keys)
+            if (totalKeys > 1) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    IconButton(
+                        onClick = onMoveUp,
+                        enabled = index > 0,
+                        modifier = Modifier.size(24.dp)
                     ) {
+                        Icon(
+                            Icons.Default.KeyboardArrowUp,
+                            contentDescription = "Move up",
+                            modifier = Modifier.size(18.dp),
+                            tint = if (index > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                        )
+                    }
+                    Text(
+                        "${index + 1}",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                        fontSize = 9.sp
+                    )
+                    IconButton(
+                        onClick = onMoveDown,
+                        enabled = index < totalKeys - 1,
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.KeyboardArrowDown,
+                            contentDescription = "Move down",
+                            modifier = Modifier.size(18.dp),
+                            tint = if (index < totalKeys - 1) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(6.dp))
+            }
+
+            // Status indicator
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .border(
+                        width = 2.dp,
+                        color = if (entry.isValidated) StatusSuccess else if (entry.lastError != null) StatusError else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                        shape = RoundedCornerShape(50)
+                    )
+            )
+
+            Spacer(modifier = Modifier.width(10.dp))
+
+            // Key info
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        entry.label,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (entry.isValidated) StatusSuccess else MaterialTheme.colorScheme.onSurface
+                    )
+                    if (isActive && entry.isValidated) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = AccentCyan.copy(alpha = 0.15f)
+                        ) {
+                            Text(
+                                "ACTIVE",
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = AccentCyan,
+                                fontSize = 9.sp
+                            )
+                        }
+                    }
+                }
+                Text(
+                    entry.maskedKey,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                    fontWeight = FontWeight.Medium
+                )
+                entry.lastError?.let { err ->
+                    Text(
+                        err.take(50),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = StatusError,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                if (entry.selectedModels.isNotEmpty()) {
+                    Text(
+                        "${entry.selectedModels.size} model(s) selected",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AccentCyan.copy(alpha = 0.7f)
+                    )
+                }
+            }
+
+            // Test button
+            Surface(
+                onClick = { if (!isTesting) onTest() },
+                shape = RoundedCornerShape(8.dp),
+                color = if (entry.isValidated) StatusSuccess.copy(alpha = 0.1f) else AccentGold.copy(alpha = 0.15f)
+            ) {
+                Box(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                    if (isTesting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = AccentGold
+                        )
+                    } else {
                         Text(
-                            "ACTIVE",
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            if (entry.isValidated) "Re-test" else "Test",
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
-                            color = AccentCyan,
-                            fontSize = 9.sp
+                            color = if (entry.isValidated) StatusSuccess else AccentGold
                         )
                     }
                 }
             }
-            Text(
-                entry.maskedKey,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-                fontWeight = FontWeight.Medium
-            )
-            entry.lastError?.let { err ->
-                Text(
-                    err.take(50),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = StatusError,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+
+            // Models select/deselect button (only if checked models exist)
+            if (entry.checkedModels.isNotEmpty()) {
+                Spacer(modifier = Modifier.width(4.dp))
+                Surface(
+                    onClick = { showModels = !showModels },
+                    shape = RoundedCornerShape(8.dp),
+                    color = AccentCyan.copy(alpha = 0.12f)
+                ) {
+                    Text(
+                        if (showModels) "Hide" else "Models",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentCyan
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(4.dp))
+
+            // Delete button
+            IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = "Remove key",
+                    modifier = Modifier.size(18.dp),
+                    tint = StatusError.copy(alpha = 0.6f)
                 )
             }
         }
 
-        // Test button
-        Surface(
-            onClick = { if (!isTesting) onTest() },
-            shape = RoundedCornerShape(8.dp),
-            color = if (entry.isValidated) StatusSuccess.copy(alpha = 0.1f) else AccentGold.copy(alpha = 0.15f)
-        ) {
-            Box(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
-                if (isTesting) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                        color = AccentGold
-                    )
-                } else {
-                    Text(
-                        if (entry.isValidated) "Re-test" else "Test",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = if (entry.isValidated) StatusSuccess else AccentGold
-                    )
+        // Check All Models button
+        if (hasModelsLoaded) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
+                    onClick = { if (!isCheckingAll) onCheckAll() },
+                    shape = RoundedCornerShape(8.dp),
+                    color = AccentCyan.copy(alpha = 0.12f),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (isCheckingAll) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(14.dp),
+                                strokeWidth = 2.dp,
+                                color = AccentCyan
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            val done = modelCheckProgress.count { it.value != null }
+                            val total = modelCheckProgress.size
+                            Text(
+                                "Checking... $done/$total",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = AccentCyan
+                            )
+                        } else {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = AccentCyan
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                "Check All Models",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = AccentCyan
+                            )
+                        }
+                    }
+                }
+
+                // Show/hide models toggle (only if checked models exist)
+                if (entry.checkedModels.isNotEmpty()) {
+                    Surface(
+                        onClick = { showModels = !showModels },
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    ) {
+                        Text(
+                            if (showModels) "Hide" else "${entry.workingModels.size} OK",
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                    }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.width(4.dp))
+        // Live progress during checking
+        if (isCheckingAll && modelCheckProgress.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 8.dp)
+            ) {
+                modelCheckProgress.forEach { (modelId, result) ->
+                    // result: null = pending, "" = pass, non-empty string = error message
+                    val isPass = result?.isEmpty() == true
+                    val isFail = result?.isNotEmpty() == true
+                    // isPending when result is null (entry exists but value is null)
+                    val isPending = result == null
 
-        // Delete button
-        IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
-            Icon(
-                Icons.Default.Delete,
-                contentDescription = "Remove key",
-                modifier = Modifier.size(18.dp),
-                tint = StatusError.copy(alpha = 0.6f)
-            )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        when {
+                            isPending -> CircularProgressIndicator(
+                                modifier = Modifier.size(12.dp),
+                                strokeWidth = 1.5.dp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+                            )
+                            isPass -> Icon(
+                                Icons.Default.Check,
+                                contentDescription = null,
+                                modifier = Modifier.size(12.dp),
+                                tint = StatusSuccess
+                            )
+                            else -> Icon(
+                                Icons.Default.Close,
+                                contentDescription = null,
+                                modifier = Modifier.size(12.dp),
+                                tint = StatusError
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                modelId,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = when {
+                                    isPass -> StatusSuccess
+                                    isFail -> StatusError.copy(alpha = 0.7f)
+                                    else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                                },
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (isFail) {
+                                Text(
+                                    (result ?: "").take(60),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = StatusError.copy(alpha = 0.5f),
+                                    fontSize = 9.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Checked models list (expandable) — user can select/deselect
+        if (showModels && entry.checkedModels.isNotEmpty() && !isCheckingAll) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+                ),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Column(modifier = Modifier.padding(8.dp)) {
+                    Text(
+                        "Select models for this key:",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                    entry.checkedModels.toSortedMap().forEach { (modelId, errorMsg) ->
+                        val works = errorMsg == null
+                        val isModelSelected = modelId in entry.selectedModels
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = works) { onToggleModel(modelId) }
+                                .padding(vertical = 4.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = isModelSelected,
+                                onCheckedChange = { if (works) onToggleModel(modelId) },
+                                enabled = works,
+                                modifier = Modifier.size(20.dp),
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = AccentCyan,
+                                    uncheckedColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+                                )
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    modelId,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (works) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (errorMsg != null) {
+                                    Text(
+                                        errorMsg.take(60),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = StatusError.copy(alpha = 0.6f),
+                                        fontSize = 9.sp,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                            // Status badge
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = if (works) StatusSuccess.copy(alpha = 0.15f) else StatusError.copy(alpha = 0.15f)
+                            ) {
+                                Text(
+                                    if (works) "OK" else "FAIL",
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (works) StatusSuccess else StatusError,
+                                    fontSize = 9.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -680,66 +1000,205 @@ private fun ModeOption(
 private fun OnlineModelOption(
     model: GeminiModelInfo,
     isSelected: Boolean,
-    onClick: () -> Unit
+    apiKeys: List<ApiKeyEntry>,
+    testingSingleModel: String?,
+    onClick: () -> Unit,
+    onTestForKey: (String) -> Unit
 ) {
+    var expanded by remember { mutableStateOf(false) }
+
     val borderMod = if (isSelected) {
         Modifier.border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
     } else {
         Modifier
     }
 
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .then(borderMod)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .animateContentSize()
     ) {
-        RadioButton(
-            selected = isSelected,
-            onClick = onClick,
-            colors = RadioButtonDefaults.colors(selectedColor = AccentCyan, unselectedColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                model.modelId,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                color = if (isSelected) AccentCyan else MaterialTheme.colorScheme.onSurface
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            RadioButton(
+                selected = isSelected,
+                onClick = onClick,
+                colors = RadioButtonDefaults.colors(selectedColor = AccentCyan, unselectedColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
             )
-            model.displayName?.let { displayName ->
-                if (displayName != model.modelId) {
+            Spacer(modifier = Modifier.width(8.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    model.modelId,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    color = if (isSelected) AccentCyan else MaterialTheme.colorScheme.onSurface
+                )
+                model.displayName?.let { displayName ->
+                    if (displayName != model.modelId) {
+                        Text(
+                            displayName,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                Row {
+                    model.inputTokenLimit?.let {
+                        Text(
+                            "In: ${formatTokenCount(it)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    model.outputTokenLimit?.let {
+                        Text(
+                            "Out: ${formatTokenCount(it)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
+                        )
+                    }
+                }
+
+                // Per-key status summary row
+                if (apiKeys.any { it.checkedModels.containsKey(model.modelId) }) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        apiKeys.forEach { key ->
+                            val status = key.isModelWorking(model.modelId)
+                            if (status != null) {
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = if (status) StatusSuccess.copy(alpha = 0.15f) else StatusError.copy(alpha = 0.15f)
+                                ) {
+                                    Text(
+                                        "${key.label}: ${if (status) "OK" else "FAIL"}",
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontSize = 8.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (status) StatusSuccess else StatusError
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Show expand arrow if there are keys to test
+            if (apiKeys.isNotEmpty()) {
+                Surface(
+                    onClick = { expanded = !expanded },
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                ) {
                     Text(
-                        displayName,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        if (expanded) "Less" else "Test",
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentCyan,
+                        fontSize = 10.sp
                     )
                 }
             }
-            Row {
-                model.inputTokenLimit?.let {
-                    Text(
-                        "In: ${formatTokenCount(it)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                }
-                model.outputTokenLimit?.let {
-                    Text(
-                        "Out: ${formatTokenCount(it)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
-                    )
-                }
+
+            if (isSelected) {
+                Spacer(modifier = Modifier.width(4.dp))
+                Icon(Icons.Default.Check, contentDescription = "Selected", tint = AccentCyan, modifier = Modifier.size(20.dp))
             }
         }
-        if (isSelected) {
-            Icon(Icons.Default.Check, contentDescription = "Selected", tint = AccentCyan, modifier = Modifier.size(20.dp))
+
+        // Expanded: per-key test status + test button
+        if (expanded && apiKeys.isNotEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 48.dp, end = 12.dp, bottom = 8.dp)
+            ) {
+                apiKeys.forEach { key ->
+                    val status = key.isModelWorking(model.modelId)
+                    val error = key.modelError(model.modelId)
+                    val isTesting = testingSingleModel == "${key.id}:${model.modelId}"
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Status icon
+                        when (status) {
+                            true -> Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp), tint = StatusSuccess)
+                            false -> Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(14.dp), tint = StatusError)
+                            null -> Box(
+                                modifier = Modifier
+                                    .size(14.dp)
+                                    .border(1.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), RoundedCornerShape(50))
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                key.label,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = when (status) {
+                                    true -> StatusSuccess
+                                    false -> StatusError
+                                    null -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                }
+                            )
+                            if (error != null) {
+                                Text(
+                                    error.take(60),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = StatusError.copy(alpha = 0.7f),
+                                    fontSize = 9.sp,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
+                        // Test button per key
+                        Surface(
+                            onClick = { if (!isTesting) onTestForKey(key.id) },
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (status == true) StatusSuccess.copy(alpha = 0.1f) else AccentGold.copy(alpha = 0.12f)
+                        ) {
+                            Box(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+                                if (isTesting) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(12.dp),
+                                        strokeWidth = 1.5.dp,
+                                        color = AccentGold
+                                    )
+                                } else {
+                                    Text(
+                                        if (status != null) "Re-test" else "Test",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 9.sp,
+                                        color = if (status == true) StatusSuccess else AccentGold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

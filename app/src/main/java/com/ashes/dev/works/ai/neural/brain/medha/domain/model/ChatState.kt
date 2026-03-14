@@ -23,6 +23,12 @@ data class ChatState(
     val isFetchingOnlineModels: Boolean = false,
     val isTestingKeyId: String? = null,
     val apiKeyTestResult: String? = null,
+    // "Check All Models" progress per key
+    val checkingAllModelsKeyId: String? = null,
+    // modelId -> null=pending, ""=pass, "error msg"=fail
+    val modelCheckProgress: Map<String, String?> = emptyMap(),
+    // Single model test in progress: "keyId:modelId"
+    val testingSingleModel: String? = null,
     // Grand Master mode
     val activeGrandMaster: GrandMaster? = null,
     val activeCustomGrandMaster: CustomGrandMaster? = null,

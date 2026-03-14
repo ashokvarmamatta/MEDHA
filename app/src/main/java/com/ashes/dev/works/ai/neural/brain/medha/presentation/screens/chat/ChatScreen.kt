@@ -1099,6 +1099,14 @@ private fun WelcomeContent(uiState: ChatState, onRetry: () -> Unit, onViewLogs: 
                     Spacer(modifier = Modifier.height(6.dp))
                 } else if (uiState.appMode is AppMode.Online) {
                     Text("Model: ${uiState.onlineModelName}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = AccentCyan)
+                    val activeKey = uiState.activeKey
+                    if (activeKey != null) {
+                        Text(
+                            "Key: ${activeKey.label} \u2022 ${activeKey.selectedModels.size} model(s)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                        )
+                    }
                     Spacer(modifier = Modifier.height(6.dp))
                 }
 
@@ -1474,7 +1482,10 @@ private fun ChatInputBar(
 
 private fun getSubtitleText(uiState: ChatState): String {
     val modelName = when (uiState.appMode) {
-        is AppMode.Online -> uiState.onlineModelName
+        is AppMode.Online -> {
+            val keyLabel = uiState.activeKey?.label
+            if (keyLabel != null) "${uiState.onlineModelName} ($keyLabel)" else uiState.onlineModelName
+        }
         is AppMode.Offline -> uiState.selectedModel?.displayName ?: "No model"
     }
     val statusText = when (uiState.modelStatus) {

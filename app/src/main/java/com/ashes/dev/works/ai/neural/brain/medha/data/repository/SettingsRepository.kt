@@ -106,6 +106,15 @@ class SettingsRepository(private val context: Context) {
                 put("isValidated", entry.isValidated)
                 put("lastError", entry.lastError ?: "")
                 put("addedAt", entry.addedAt)
+                // Per-key model check results: null value = pass, string = error
+                put("checkedModels", JSONObject().apply {
+                    entry.checkedModels.forEach { (modelId, error) ->
+                        put(modelId, error ?: JSONObject.NULL)
+                    }
+                })
+                put("selectedModels", JSONArray().apply {
+                    entry.selectedModels.forEach { put(it) }
+                })
             })
         }
         return arr.toString()
@@ -116,13 +125,29 @@ class SettingsRepository(private val context: Context) {
             val arr = JSONArray(json)
             (0 until arr.length()).map { i ->
                 val obj = arr.getJSONObject(i)
+                val checkedModels = mutableMapOf<String, String?>()
+                val checkedObj = obj.optJSONObject("checkedModels")
+                if (checkedObj != null) {
+                    checkedObj.keys().forEach { key ->
+                        checkedModels[key] = if (checkedObj.isNull(key)) null else checkedObj.getString(key)
+                    }
+                }
+                val selectedModels = mutableListOf<String>()
+                val selectedArr = obj.optJSONArray("selectedModels")
+                if (selectedArr != null) {
+                    for (j in 0 until selectedArr.length()) {
+                        selectedModels.add(selectedArr.getString(j))
+                    }
+                }
                 ApiKeyEntry(
                     id = obj.getString("id"),
                     key = obj.getString("key"),
                     label = obj.optString("label", ""),
                     isValidated = obj.optBoolean("isValidated", false),
                     lastError = obj.optString("lastError", "").ifEmpty { null },
-                    addedAt = obj.optLong("addedAt", System.currentTimeMillis())
+                    addedAt = obj.optLong("addedAt", System.currentTimeMillis()),
+                    checkedModels = checkedModels,
+                    selectedModels = selectedModels
                 )
             }
         } catch (e: Exception) {
