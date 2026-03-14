@@ -241,7 +241,7 @@ class ChatViewModel(
 
     // ==================== MULTI-KEY MANAGEMENT ====================
 
-    fun addApiKey(key: String, label: String = "") {
+    fun addApiKey(key: String, label: String = "", baseUrl: String = "") {
         if (key.isBlank()) return
         // Don't add duplicate keys
         if (_uiState.value.apiKeys.any { it.key == key }) {
@@ -249,7 +249,11 @@ class ChatViewModel(
             _uiState.update { it.copy(apiKeyTestResult = "This API key already exists.") }
             return
         }
-        val newEntry = ApiKeyEntry(key = key, label = label.ifBlank { "Key ${_uiState.value.apiKeys.size + 1}" })
+        val newEntry = ApiKeyEntry(
+            key = key,
+            label = label.ifBlank { "Key ${_uiState.value.apiKeys.size + 1}" },
+            baseUrl = baseUrl
+        )
         _uiState.update { it.copy(apiKeys = it.apiKeys + newEntry) }
         saveKeys()
         addLog(LogLevel.INFO, TAG, "Added API key: ${newEntry.label}")

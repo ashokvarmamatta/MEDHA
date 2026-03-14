@@ -11,6 +11,7 @@ data class ApiKeyEntry(
     val id: String = UUID.randomUUID().toString(),
     val key: String,
     val label: String = "",
+    val baseUrl: String = "",           // optional custom base URL (e.g. OpenAI-compatible proxy)
     val isValidated: Boolean = false,
     val isEnabled: Boolean = true,
     val lastError: String? = null,

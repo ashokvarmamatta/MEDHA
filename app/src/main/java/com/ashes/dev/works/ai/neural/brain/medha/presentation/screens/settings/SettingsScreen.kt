@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -87,6 +88,12 @@ fun SettingsScreen(
     val uiState by viewModel.uiState.collectAsState()
     var newKeyInput by remember { mutableStateOf("") }
     var newKeyLabel by remember { mutableStateOf("") }
+    var newKeyBaseUrl by remember { mutableStateOf("") }
+    var curlMode by remember { mutableStateOf(false) }
+    var curlText by remember { mutableStateOf("") }
+    var parsedCurlToken by remember { mutableStateOf("") }
+    var parsedCurlBase by remember { mutableStateOf("") }
+    var parsedCurlModel by remember { mutableStateOf("") }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -165,88 +172,237 @@ fun SettingsScreen(
                     shape = RoundedCornerShape(16.dp)
                 ) {
                     Column(modifier = Modifier.padding(16.dp).animateContentSize()) {
-                        Text(
-                            "Add API Key",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        // ── Title + cURL mode toggle ─────────────────────────
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                if (curlMode) "Add via cURL" else "Add API Key",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Surface(
+                                onClick = { curlMode = !curlMode },
+                                shape = RoundedCornerShape(16.dp),
+                                color = if (curlMode) AccentCyan else MaterialTheme.colorScheme.surfaceVariant
+                            ) {
+                                Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    Text("cURL", style = MaterialTheme.typography.labelSmall,
+                                        color = if (curlMode) Color.White else MaterialTheme.colorScheme.onSurface)
+                                }
+                            }
+                        }
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            "Get your free key from Google AI Studio (aistudio.google.com)",
+                            if (curlMode) "Paste a cURL command — key, base URL & model are extracted automatically"
+                            else "Get your free key from Google AI Studio (aistudio.google.com)",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                         )
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        OutlinedTextField(
-                            value = newKeyInput,
-                            onValueChange = { newKeyInput = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("Paste your API key here", style = MaterialTheme.typography.bodyMedium) },
-                            singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                        if (curlMode) {
+                            // ── cURL MODE ────────────────────────────────────
+                            OutlinedTextField(
+                                value = curlText,
+                                onValueChange = {
+                                    curlText = it
+                                    // Parse cURL
+                                    val bearerRegex = Regex("""Authorization:\s*Bearer\s+([^\s"'\\]+)""", RegexOption.IGNORE_CASE)
+                                    parsedCurlToken = bearerRegex.find(it)?.groupValues?.get(1) ?: ""
+                                    val urlRegex = Regex("""https?://[^\s"'\\]+""")
+                                    val rawUrl = urlRegex.find(it)?.value ?: ""
+                                    parsedCurlBase = rawUrl.replace(Regex("""/chat/completions.*"""), "")
+                                        .replace(Regex("""/v1/.*"""), "/v1")
+                                    val modelRegex = Regex(""""model"\s*:\s*"([^"]+)"""")
+                                    parsedCurlModel = modelRegex.find(it)?.groupValues?.get(1) ?: ""
+                                },
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp),
+                                placeholder = { Text("curl -X POST \"https://...\" -H \"Authorization: Bearer sk-...\" -d '{\"model\":\"...\"}'", style = MaterialTheme.typography.bodySmall) },
+                                shape = RoundedCornerShape(12.dp),
+                                maxLines = 6,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                                )
                             )
-                        )
 
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        OutlinedTextField(
-                            value = newKeyLabel,
-                            onValueChange = { newKeyLabel = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("Label (optional, e.g. 'Personal', 'Work')", style = MaterialTheme.typography.bodyMedium) },
-                            singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-                            )
-                        )
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        Surface(
-                            onClick = {
-                                if (newKeyInput.isNotBlank()) {
-                                    viewModel.addApiKey(newKeyInput.trim(), newKeyLabel.trim())
-                                    newKeyInput = ""
-                                    newKeyLabel = ""
+                            // Parsed preview
+                            if (parsedCurlToken.isNotBlank() || parsedCurlBase.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                        Text("Parsed:", style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        if (parsedCurlBase.isNotBlank())
+                                            Text("🌐 $parsedCurlBase", style = MaterialTheme.typography.bodySmall)
+                                        if (parsedCurlToken.isNotBlank())
+                                            Text("🔑 ${if (parsedCurlToken.length > 8) "${parsedCurlToken.take(6)}••••${parsedCurlToken.takeLast(4)}" else "••••"}",
+                                                style = MaterialTheme.typography.bodySmall)
+                                        if (parsedCurlModel.isNotBlank())
+                                            Text("🤖 $parsedCurlModel", style = MaterialTheme.typography.bodySmall)
+                                    }
                                 }
-                            },
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (newKeyInput.isNotBlank()) AccentCyan else MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(14.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Label for cURL
+                            OutlinedTextField(
+                                value = newKeyLabel,
+                                onValueChange = { newKeyLabel = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                placeholder = { Text("Label (optional)", style = MaterialTheme.typography.bodyMedium) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                                )
+                            )
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Save cURL button
+                            Surface(
+                                onClick = {
+                                    if (parsedCurlToken.isNotBlank()) {
+                                        val lbl = newKeyLabel.trim().ifBlank {
+                                            parsedCurlModel.ifBlank { parsedCurlBase.substringAfterLast("/").take(20) }
+                                        }
+                                        viewModel.addApiKey(parsedCurlToken, lbl, parsedCurlBase)
+                                        curlText = ""
+                                        parsedCurlToken = ""
+                                        parsedCurlBase = ""
+                                        parsedCurlModel = ""
+                                        newKeyLabel = ""
+                                    }
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (parsedCurlToken.isNotBlank()) AccentCyan else MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                if (uiState.isFetchingOnlineModels) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
-                                        strokeWidth = 2.dp,
-                                        color = Color.White
-                                    )
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text("Fetching models...", color = Color.White, style = MaterialTheme.typography.labelLarge)
-                                } else {
+                                Row(
+                                    modifier = Modifier.padding(14.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     Icon(
-                                        Icons.Default.Add,
+                                        Icons.Default.Check,
                                         contentDescription = null,
                                         modifier = Modifier.size(18.dp),
-                                        tint = if (newKeyInput.isNotBlank()) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                                        tint = if (parsedCurlToken.isNotBlank()) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        "Add Key & Fetch Models",
-                                        color = if (newKeyInput.isNotBlank()) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                                        "Save from cURL",
+                                        color = if (parsedCurlToken.isNotBlank()) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
                                         style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.SemiBold
                                     )
+                                }
+                            }
+
+                        } else {
+                            // ── NORMAL KEY MODE ──────────────────────────────
+                            OutlinedTextField(
+                                value = newKeyInput,
+                                onValueChange = { newKeyInput = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                placeholder = { Text("Paste your API key here", style = MaterialTheme.typography.bodyMedium) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                                )
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            OutlinedTextField(
+                                value = newKeyLabel,
+                                onValueChange = { newKeyLabel = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                placeholder = { Text("Label (optional, e.g. 'Personal', 'Work')", style = MaterialTheme.typography.bodyMedium) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                                )
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Base URL field (optional)
+                            OutlinedTextField(
+                                value = newKeyBaseUrl,
+                                onValueChange = { newKeyBaseUrl = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                placeholder = { Text("Base URL (optional, for custom endpoints)", style = MaterialTheme.typography.bodyMedium) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                supportingText = {
+                                    Text("Leave blank for default Gemini API. Set for OpenAI-compatible proxies.",
+                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp))
+                                },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                                )
+                            )
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Surface(
+                                onClick = {
+                                    if (newKeyInput.isNotBlank()) {
+                                        viewModel.addApiKey(newKeyInput.trim(), newKeyLabel.trim(), newKeyBaseUrl.trim())
+                                        newKeyInput = ""
+                                        newKeyLabel = ""
+                                        newKeyBaseUrl = ""
+                                    }
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (newKeyInput.isNotBlank()) AccentCyan else MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(14.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (uiState.isFetchingOnlineModels) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(18.dp),
+                                            strokeWidth = 2.dp,
+                                            color = Color.White
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text("Fetching models...", color = Color.White, style = MaterialTheme.typography.labelLarge)
+                                    } else {
+                                        Icon(
+                                            Icons.Default.Add,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp),
+                                            tint = if (newKeyInput.isNotBlank()) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            "Add Key & Fetch Models",
+                                            color = if (newKeyInput.isNotBlank()) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
                                 }
                             }
                         }

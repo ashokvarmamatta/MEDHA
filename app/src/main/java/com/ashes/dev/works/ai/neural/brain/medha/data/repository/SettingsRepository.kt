@@ -103,6 +103,7 @@ class SettingsRepository(private val context: Context) {
                 put("id", entry.id)
                 put("key", entry.key)
                 put("label", entry.label)
+                put("baseUrl", entry.baseUrl)
                 put("isValidated", entry.isValidated)
                 put("isEnabled", entry.isEnabled)
                 put("lastError", entry.lastError ?: "")
@@ -144,6 +145,7 @@ class SettingsRepository(private val context: Context) {
                     id = obj.getString("id"),
                     key = obj.getString("key"),
                     label = obj.optString("label", ""),
+                    baseUrl = obj.optString("baseUrl", ""),
                     isValidated = obj.optBoolean("isValidated", false),
                     isEnabled = obj.optBoolean("isEnabled", true),
                     lastError = obj.optString("lastError", "").ifEmpty { null },
