@@ -1512,6 +1512,6 @@ private fun getDetailedStatusText(uiState: ChatState): String = when (uiState.mo
     is ModelStatus.Initializing -> "Loading model into memory..."
     is ModelStatus.Ready -> if (uiState.appMode is AppMode.Online) "Connected to Gemini API. Start chatting below." else "Offline engine ready. Start chatting below."
     is ModelStatus.Error -> "Error: ${uiState.modelStatus.message}"
-    is ModelStatus.ModelNotFound -> "No model file found in Downloads folder."
-    is ModelStatus.PermissionRequired -> "Grant 'All Files Access' permission in device settings."
+    is ModelStatus.ModelNotFound -> "No models imported. Use Import Model in Settings."
+    is ModelStatus.PermissionRequired -> "Cannot read model file."
 }

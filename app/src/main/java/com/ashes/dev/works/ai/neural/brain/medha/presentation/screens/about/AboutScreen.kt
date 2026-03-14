@@ -119,10 +119,9 @@ fun AboutScreen(onNavigateBack: () -> Unit) {
 
             InfoSection("Offline Setup", Icons.Default.Build, AccentGreen) {
                 GuideStep("1", "Download Model", "Get a Gemma .bin model file (see Settings for download links).")
-                GuideStep("2", "Place in Downloads", "Move the model file to your device's Downloads folder.")
-                GuideStep("3", "Grant Permission", "Allow 'All Files Access' so the app can read the model.")
-                GuideStep("4", "Select Model", "Go to Settings > Offline Models to pick your model.")
-                GuideStep("5", "Start Chatting", "The engine loads automatically. Type your first message!")
+                GuideStep("2", "Import Model", "Go to Settings > Offline Models and tap 'Import Model File'.")
+                GuideStep("3", "Select Model", "Pick the imported model from the list.")
+                GuideStep("4", "Start Chatting", "The engine loads automatically. Type your first message!")
             }
 
             Spacer(modifier = Modifier.height(16.dp))

@@ -63,6 +63,7 @@ class ChatViewModel(
         const val APP_VERSION = "1.0.0"
         private const val GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/"
         val SUPPORTED_EXTENSIONS = listOf(".bin")
+        private const val MODELS_DIR = "offline_models"
     }
 
     private val _uiState = MutableStateFlow(ChatState())
@@ -172,16 +173,17 @@ class ChatViewModel(
 
     // ==================== MODEL SCANNING ====================
 
+    private fun modelsDir(): java.io.File {
+        val dir = java.io.File(application.filesDir, MODELS_DIR)
+        if (!dir.exists()) dir.mkdirs()
+        return dir
+    }
+
     fun scanAvailableModels() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                if (!downloadsDir.exists() || !downloadsDir.canRead()) {
-                    addLog(LogLevel.WARNING, TAG, "Cannot access Downloads folder")
-                    return@launch
-                }
-
-                val models = downloadsDir.listFiles()
+                val dir = modelsDir()
+                val models = dir.listFiles()
                     ?.filter { file ->
                         file.isFile && SUPPORTED_EXTENSIONS.any { file.name.endsWith(it, ignoreCase = true) }
                     }
@@ -191,15 +193,56 @@ class ChatViewModel(
                 _uiState.update { it.copy(availableModels = models) }
 
                 if (models.isNotEmpty()) {
-                    addLog(LogLevel.INFO, TAG, "Found ${models.size} model(s)")
+                    addLog(LogLevel.INFO, TAG, "Found ${models.size} model(s) in app storage")
                     if (_uiState.value.selectedModel == null) {
                         _uiState.update { it.copy(selectedModel = models.first()) }
                     }
                 } else {
-                    addLog(LogLevel.WARNING, TAG, "No model files (.bin) found in Downloads folder")
+                    addLog(LogLevel.INFO, TAG, "No models imported yet — use Import Model in Settings")
                 }
             } catch (e: Exception) {
                 addLog(LogLevel.ERROR, TAG, "Model scan failed: ${e.message}")
+            }
+        }
+    }
+
+    fun importModelFromUri(uri: Uri, fileName: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                addLog(LogLevel.INFO, TAG, "Importing model: $fileName")
+                val destFile = java.io.File(modelsDir(), fileName)
+                application.contentResolver.openInputStream(uri)?.use { input ->
+                    java.io.FileOutputStream(destFile).use { output ->
+                        val buffer = ByteArray(8192)
+                        var bytesRead: Int
+                        while (input.read(buffer).also { bytesRead = it } != -1) {
+                            output.write(buffer, 0, bytesRead)
+                        }
+                    }
+                } ?: throw Exception("Cannot read file")
+                addLog(LogLevel.INFO, TAG, "Imported: $fileName (${destFile.length() / (1024 * 1024)} MB)")
+                scanAvailableModels()
+            } catch (e: Exception) {
+                addLog(LogLevel.ERROR, TAG, "Import failed: ${e.message}")
+            }
+        }
+    }
+
+    fun deleteModel(model: ModelInfo) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val file = java.io.File(model.filePath)
+                if (file.delete()) {
+                    addLog(LogLevel.INFO, TAG, "Deleted model: ${model.fileName}")
+                    if (_uiState.value.selectedModel?.filePath == model.filePath) {
+                        llmInference?.close()
+                        llmInference = null
+                        _uiState.update { it.copy(selectedModel = null, modelStatus = ModelStatus.ModelNotFound) }
+                    }
+                    scanAvailableModels()
+                }
+            } catch (e: Exception) {
+                addLog(LogLevel.ERROR, TAG, "Delete failed: ${e.message}")
             }
         }
     }
@@ -1059,10 +1102,6 @@ class ChatViewModel(
 
                 if (!modelFile.exists()) {
                     _uiState.update { it.copy(modelStatus = ModelStatus.ModelNotFound) }
-                    return@launch
-                }
-                if (!modelFile.canRead()) {
-                    _uiState.update { it.copy(modelStatus = ModelStatus.PermissionRequired) }
                     return@launch
                 }
 

@@ -57,9 +57,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.text.font.FontWeight
@@ -94,6 +99,21 @@ fun SettingsScreen(
     var parsedCurlToken by remember { mutableStateOf("") }
     var parsedCurlBase by remember { mutableStateOf("") }
     var parsedCurlModel by remember { mutableStateOf("") }
+    var showDeleteModel by remember { mutableStateOf<com.ashes.dev.works.ai.neural.brain.medha.domain.model.ModelInfo?>(null) }
+
+    val context = LocalContext.current
+    // SAF file picker for importing offline models — no permission needed
+    val modelPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val fileName = context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            cursor.moveToFirst()
+            if (nameIndex >= 0) cursor.getString(nameIndex) else null
+        } ?: uri.lastPathSegment?.substringAfterLast('/') ?: "model.bin"
+        viewModel.importModelFromUri(uri, fileName)
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -621,35 +641,10 @@ fun SettingsScreen(
 
             // Offline Model Selection
             if (uiState.appMode is AppMode.Offline) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    SectionHeader("Offline Models")
-                    IconButton(onClick = { viewModel.scanAvailableModels() }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Rescan", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                    }
-                }
+                SectionHeader("Offline Models")
                 Spacer(modifier = Modifier.height(8.dp))
 
-                if (uiState.availableModels.isEmpty()) {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)),
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text("No models found", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                "Place .bin model files in your Downloads folder, then tap the refresh button above.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                            )
-                        }
-                    }
-                } else {
+                if (uiState.availableModels.isNotEmpty()) {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
@@ -660,7 +655,8 @@ fun SettingsScreen(
                                 ModelOption(
                                     model = model,
                                     isSelected = uiState.selectedModel?.filePath == model.filePath,
-                                    onClick = { viewModel.selectModel(model) }
+                                    onClick = { viewModel.selectModel(model) },
+                                    onDelete = { showDeleteModel = model }
                                 )
                                 if (index < uiState.availableModels.size - 1) {
                                     HorizontalDivider(
@@ -671,6 +667,39 @@ fun SettingsScreen(
                             }
                         }
                     }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
+                // Import model button
+                Surface(
+                    onClick = { modelPickerLauncher.launch(arrayOf("application/octet-stream", "*/*")) },
+                    shape = RoundedCornerShape(12.dp),
+                    color = AccentCyan,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp), tint = Color.White)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            if (uiState.availableModels.isEmpty()) "Import Model File (.bin)" else "Import Another Model",
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
+                if (uiState.availableModels.isEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "Download a .bin model, then tap above to import it into the app.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    )
                 }
 
                 // Where to get models (shown under offline mode)
@@ -678,6 +707,27 @@ fun SettingsScreen(
                 OfflineModelSourcesSection()
 
                 Spacer(modifier = Modifier.height(24.dp))
+            }
+
+            // Delete model confirmation dialog
+            showDeleteModel?.let { model ->
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { showDeleteModel = null },
+                    icon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
+                    title = { Text("Delete Model?", fontWeight = FontWeight.Bold) },
+                    text = { Text("Delete ${model.fileName} (${model.sizeInMb} MB) from app storage?") },
+                    confirmButton = {
+                        androidx.compose.material3.TextButton(onClick = {
+                            viewModel.deleteModel(model)
+                            showDeleteModel = null
+                        }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                    },
+                    dismissButton = {
+                        androidx.compose.material3.TextButton(onClick = { showDeleteModel = null }) {
+                            Text("Cancel")
+                        }
+                    }
+                )
             }
 
             // Current Status Info
@@ -1401,7 +1451,8 @@ private fun formatTokenCount(tokens: Int): String {
 private fun ModelOption(
     model: ModelInfo,
     isSelected: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onDelete: (() -> Unit)? = null
 ) {
     val borderMod = if (isSelected) {
         Modifier.border(1.dp, AccentGold.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
@@ -1425,6 +1476,11 @@ private fun ModelOption(
         }
         if (isSelected) {
             Icon(Icons.Default.Check, contentDescription = "Selected", tint = AccentGold, modifier = Modifier.size(20.dp))
+        }
+        onDelete?.let {
+            IconButton(onClick = it, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.Delete, "Delete", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
+            }
         }
     }
 }
