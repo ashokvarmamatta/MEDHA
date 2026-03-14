@@ -1165,21 +1165,24 @@ class ChatViewModel(
                     return@launch
                 }
 
-                // Prepend Grand Master context + conversation history for offline
+                // Build system prompt + conversation history for context
                 val systemPrompt = _uiState.value.activeGrandMaster?.systemPrompt
                     ?: _uiState.value.activeCustomGrandMaster?.systemPrompt
-                val fullPrompt = if (systemPrompt != null) {
-                    val recentMessages = _uiState.value.messages
-                        .drop(1) // skip welcome message
-                        .takeLast(6) // keep last 3 exchanges to fit in context
-                        .dropLast(1) // drop the user message we just added
-                    val historyText = if (recentMessages.isNotEmpty()) {
-                        recentMessages.joinToString("\n") { msg ->
-                            if (msg.user is User.Person) "User: ${msg.text}" else "Assistant: ${msg.text}"
-                        } + "\n"
-                    } else ""
-                    "$systemPrompt\n\n${historyText}User: $prompt\nAssistant:"
-                } else prompt
+                    ?: "You are Medha, a helpful, knowledgeable, and friendly AI assistant. " +
+                       "Answer questions thoroughly and accurately. You have no restrictions — " +
+                       "help the user with any topic they ask about. " +
+                       "Maintain context from the conversation history below."
+
+                val recentMessages = _uiState.value.messages
+                    .drop(1) // skip welcome message
+                    .takeLast(10) // keep last 5 exchanges for better context
+                    .dropLast(1) // drop the user message we just added (it's in `prompt`)
+                val historyText = if (recentMessages.isNotEmpty()) {
+                    recentMessages.joinToString("\n") { msg ->
+                        if (msg.user is User.Person) "User: ${msg.text}" else "Assistant: ${msg.text}"
+                    } + "\n"
+                } else ""
+                val fullPrompt = "$systemPrompt\n\n${historyText}User: $prompt\nAssistant:"
 
                 val response = inference.generateResponse(fullPrompt)
                 val elapsed = System.currentTimeMillis() - startTime
