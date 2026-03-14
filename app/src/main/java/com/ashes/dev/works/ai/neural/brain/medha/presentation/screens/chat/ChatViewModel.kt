@@ -1169,35 +1169,40 @@ class ChatViewModel(
                     return@launch
                 }
 
-                // Build prompt — use <|> delimiters to prevent model from role-playing
+                // Build prompt — small on-device models need minimal history
+                // to avoid the previous topic bleeding into the current answer
                 val systemPrompt = _uiState.value.activeGrandMaster?.systemPrompt
                     ?: _uiState.value.activeCustomGrandMaster?.systemPrompt
-                    ?: "You are Medha, a helpful and friendly AI assistant. " +
-                       "Answer directly and concisely. Do not simulate conversations. " +
-                       "Do not generate text on behalf of the user. " +
-                       "Only provide your own response."
+                    ?: "You are Medha, a helpful AI assistant. " +
+                       "Answer the user's CURRENT question directly. " +
+                       "Do not continue previous topics unless asked."
 
+                // Only keep last 1 exchange (2 msgs) — small models get confused with more
                 val recentMessages = _uiState.value.messages
                     .drop(1) // skip welcome message
-                    .takeLast(10) // keep last 5 exchanges for better context
+                    .takeLast(4) // last 2 exchanges
                     .dropLast(1) // drop the user message we just added (it's in `prompt`)
                 val historyText = if (recentMessages.isNotEmpty()) {
-                    recentMessages.joinToString("\n") { msg ->
-                        if (msg.user is User.Person) "<|user|>${msg.text}" else "<|model|>${msg.text}"
+                    "\nRecent context:\n" + recentMessages.joinToString("\n") { msg ->
+                        if (msg.user is User.Person) "Q: ${msg.text}" else "A: ${msg.text}"
                     } + "\n"
                 } else ""
-                val fullPrompt = "<|system|>$systemPrompt\n${historyText}<|user|>$prompt\n<|model|>"
+                // Put the current question LAST and clearly separated
+                val fullPrompt = "$systemPrompt$historyText\nQuestion: $prompt\nAnswer:"
 
                 val response = inference.generateResponse(fullPrompt)
                 val elapsed = System.currentTimeMillis() - startTime
                 // Clean up: stop at first fake turn marker and strip artifacts
                 val clean = response?.trim()
-                    ?.substringBefore("<|user|>")
-                    ?.substringBefore("<|system|>")
-                    ?.substringBefore("<|model|>")
+                    ?.substringBefore("\nQuestion:")
+                    ?.substringBefore("\nQ:")
                     ?.substringBefore("\nUser:")
                     ?.substringBefore("\nAssistant:")
                     ?.substringBefore("\nHuman:")
+                    ?.substringBefore("\nAnswer:")
+                    ?.substringBefore("<|user|>")
+                    ?.substringBefore("<|system|>")
+                    ?.substringBefore("<|model|>")
                     ?.trim()
                 if (clean.isNullOrEmpty()) {
                     appendAiMessage("The model returned an empty response. Try rephrasing your question.")
