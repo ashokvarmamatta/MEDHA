@@ -45,6 +45,8 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -311,6 +313,7 @@ fun SettingsScreen(
                                     onToggleModel = { modelId -> viewModel.toggleModelForKey(entry.id, modelId) },
                                     onMoveUp = { viewModel.moveApiKey(entry.id, -1) },
                                     onMoveDown = { viewModel.moveApiKey(entry.id, 1) },
+                                    onToggleEnabled = { viewModel.toggleApiKeyEnabled(entry.id) },
                                     onDelete = { viewModel.removeApiKey(entry.id) }
                                 )
                                 if (index < uiState.apiKeys.size - 1) {
@@ -572,6 +575,7 @@ private fun ApiKeyItem(
     onToggleModel: (String) -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
+    onToggleEnabled: () -> Unit,
     onDelete: () -> Unit
 ) {
     var showModels by remember { mutableStateOf(false) }
@@ -684,16 +688,41 @@ private fun ApiKeyItem(
                     Text(
                         "${entry.selectedModels.size} model(s) selected",
                         style = MaterialTheme.typography.labelSmall,
-                        color = AccentCyan.copy(alpha = 0.7f)
+                        color = AccentCyan.copy(alpha = if (entry.isEnabled) 0.7f else 0.3f)
+                    )
+                }
+                if (!entry.isEnabled) {
+                    Text(
+                        "Disabled",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
                     )
                 }
             }
 
+            // Enable/Disable toggle
+            Switch(
+                checked = entry.isEnabled,
+                onCheckedChange = { onToggleEnabled() },
+                modifier = Modifier.height(24.dp),
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = StatusSuccess,
+                    checkedTrackColor = StatusSuccess.copy(alpha = 0.3f),
+                    uncheckedThumbColor = MaterialTheme.colorScheme.outline,
+                    uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            )
+
+            Spacer(modifier = Modifier.width(4.dp))
+
             // Test button
             Surface(
-                onClick = { if (!isTesting) onTest() },
+                onClick = { if (!isTesting && entry.isEnabled) onTest() },
                 shape = RoundedCornerShape(8.dp),
-                color = if (entry.isValidated) StatusSuccess.copy(alpha = 0.1f) else AccentGold.copy(alpha = 0.15f)
+                color = if (!entry.isEnabled) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                    else if (entry.isValidated) StatusSuccess.copy(alpha = 0.1f)
+                    else AccentGold.copy(alpha = 0.15f)
             ) {
                 Box(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
                     if (isTesting) {
@@ -707,7 +736,8 @@ private fun ApiKeyItem(
                             if (entry.isValidated) "Re-test" else "Test",
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
-                            color = if (entry.isValidated) StatusSuccess else AccentGold
+                            color = if (!entry.isEnabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+                                else if (entry.isValidated) StatusSuccess else AccentGold
                         )
                     }
                 }

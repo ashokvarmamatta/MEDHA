@@ -12,6 +12,7 @@ data class ApiKeyEntry(
     val key: String,
     val label: String = "",
     val isValidated: Boolean = false,
+    val isEnabled: Boolean = true,
     val lastError: String? = null,
     val addedAt: Long = System.currentTimeMillis(),
     // Per-key model check results: modelId -> null (pass) / "error message" (fail)

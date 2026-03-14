@@ -104,6 +104,7 @@ class SettingsRepository(private val context: Context) {
                 put("key", entry.key)
                 put("label", entry.label)
                 put("isValidated", entry.isValidated)
+                put("isEnabled", entry.isEnabled)
                 put("lastError", entry.lastError ?: "")
                 put("addedAt", entry.addedAt)
                 // Per-key model check results: null value = pass, string = error
@@ -144,6 +145,7 @@ class SettingsRepository(private val context: Context) {
                     key = obj.getString("key"),
                     label = obj.optString("label", ""),
                     isValidated = obj.optBoolean("isValidated", false),
+                    isEnabled = obj.optBoolean("isEnabled", true),
                     lastError = obj.optString("lastError", "").ifEmpty { null },
                     addedAt = obj.optLong("addedAt", System.currentTimeMillis()),
                     checkedModels = checkedModels,

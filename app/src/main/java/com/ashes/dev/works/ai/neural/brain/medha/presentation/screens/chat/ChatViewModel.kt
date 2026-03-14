@@ -257,6 +257,18 @@ class ChatViewModel(
         fetchOnlineModels(key)
     }
 
+    fun toggleApiKeyEnabled(id: String) {
+        _uiState.update { state ->
+            state.copy(
+                apiKeys = state.apiKeys.map {
+                    if (it.id == id) it.copy(isEnabled = !it.isEnabled) else it
+                }
+            )
+        }
+        saveKeys()
+        syncActiveModel()
+    }
+
     fun removeApiKey(id: String) {
         _uiState.update {
             val updated = it.apiKeys.filter { entry -> entry.id != id }
