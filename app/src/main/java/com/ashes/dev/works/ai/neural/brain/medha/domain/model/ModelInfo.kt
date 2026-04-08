@@ -4,12 +4,19 @@ data class ModelInfo(
     val fileName: String,
     val filePath: String,
     val sizeInMb: Long,
-    val displayName: String
+    val displayName: String,
+    val isLiteRtFormat: Boolean = false
 ) {
     companion object {
+        val SUPPORTED_EXTENSIONS = listOf(".bin", ".litertlm", ".task")
+
         fun fromFileName(fileName: String, filePath: String, sizeBytes: Long): ModelInfo {
+            val ext = fileName.substringAfterLast('.', "").lowercase()
+            val isLiteRt = ext == "litertlm" || ext == "task"
             val displayName = fileName
                 .removeSuffix(".bin")
+                .removeSuffix(".litertlm")
+                .removeSuffix(".task")
                 .replace("-", " ")
                 .replace("_", " ")
                 .split(" ")
@@ -20,7 +27,8 @@ data class ModelInfo(
                 fileName = fileName,
                 filePath = filePath,
                 sizeInMb = sizeBytes / (1024 * 1024),
-                displayName = displayName
+                displayName = displayName,
+                isLiteRtFormat = isLiteRt
             )
         }
     }
