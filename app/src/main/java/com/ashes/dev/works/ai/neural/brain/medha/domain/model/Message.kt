@@ -8,7 +8,15 @@ data class Message(
     val user: User,
     val timestamp: Long = System.currentTimeMillis(),
     val imageUri: String? = null,
-    val generatedImages: List<GeneratedImage> = emptyList()
+    val generatedImages: List<GeneratedImage> = emptyList(),
+    // Token stats (shown below AI messages)
+    val tokenCount: Int = 0,
+    val latencyMs: Long = 0,
+    val tokensPerSec: Float = 0f,
+    val isStreaming: Boolean = false,
+    val thinkingText: String? = null,
+    val provider: String = "",  // "offline", "gemini", etc.
+    val timeToFirstTokenMs: Long = 0
 )
 
 data class GeneratedImage(

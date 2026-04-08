@@ -11,7 +11,7 @@ android {
 
     defaultConfig {
         applicationId = "com.ashes.dev.works.ai.neural.brain.medha"
-        minSdk = 24
+        minSdk = 31
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
@@ -72,7 +72,7 @@ dependencies {
     implementation(libs.moshi.kotlin)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.material)
-    implementation(libs.mediapipe.tasks.genai)
+    implementation(libs.litertlm)
     implementation(libs.koin.android)
     implementation(libs.koin.androidx.compose)
     testImplementation(libs.junit)

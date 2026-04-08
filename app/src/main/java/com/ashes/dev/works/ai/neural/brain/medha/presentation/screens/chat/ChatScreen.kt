@@ -451,7 +451,7 @@ private fun ImageResponseStyleSheet(
 private fun StatusDot(modelStatus: ModelStatus) {
     val color = when (modelStatus) {
         is ModelStatus.Ready -> StatusSuccess
-        is ModelStatus.Initializing -> StatusWarning
+        is ModelStatus.Initializing, is ModelStatus.Loading, is ModelStatus.Downloading -> StatusWarning
         is ModelStatus.Error, is ModelStatus.ModelNotFound, is ModelStatus.PermissionRequired -> StatusError
         is ModelStatus.Idle -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
     }
@@ -855,10 +855,12 @@ private fun getSubtitleText(uiState: ChatState): String {
     val statusText = when (uiState.modelStatus) {
         is ModelStatus.Idle -> "Idle"
         is ModelStatus.Initializing -> "Loading..."
+        is ModelStatus.Loading -> "Loading ${(uiState.modelStatus as ModelStatus.Loading).detail}"
         is ModelStatus.Ready -> "Ready"
         is ModelStatus.Error -> "Error"
         is ModelStatus.ModelNotFound -> "Model not found"
         is ModelStatus.PermissionRequired -> "Permission needed"
+        is ModelStatus.Downloading -> "Downloading..."
     }
     return "$modelName \u2022 $statusText"
 }
@@ -866,7 +868,7 @@ private fun getSubtitleText(uiState: ChatState): String {
 @Composable
 private fun getStatusColor(status: ModelStatus): Color = when (status) {
     is ModelStatus.Ready -> StatusSuccess
-    is ModelStatus.Initializing -> StatusWarning
+    is ModelStatus.Initializing, is ModelStatus.Loading, is ModelStatus.Downloading -> StatusWarning
     is ModelStatus.Error, is ModelStatus.ModelNotFound, is ModelStatus.PermissionRequired -> StatusError
     is ModelStatus.Idle -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
 }
@@ -874,8 +876,10 @@ private fun getStatusColor(status: ModelStatus): Color = when (status) {
 private fun getDetailedStatusText(uiState: ChatState): String = when (uiState.modelStatus) {
     is ModelStatus.Idle -> "The AI engine has not started yet."
     is ModelStatus.Initializing -> "Loading model into memory..."
-    is ModelStatus.Ready -> if (uiState.appMode is AppMode.Online) "Connected to Gemini API. Start chatting below." else "Offline engine ready. Start chatting below."
+    is ModelStatus.Loading -> (uiState.modelStatus as ModelStatus.Loading).let { "Loading model... ${(it.progress * 100).toInt()}% ${it.detail}" }
+    is ModelStatus.Ready -> if (uiState.appMode is AppMode.Online) "Connected to Gemini API. Start chatting below." else "Offline engine ready (LiteRT LM). Start chatting below."
     is ModelStatus.Error -> "Error: ${uiState.modelStatus.message}"
-    is ModelStatus.ModelNotFound -> "No model file found in Downloads folder."
-    is ModelStatus.PermissionRequired -> "Grant 'All Files Access' permission in device settings."
+    is ModelStatus.ModelNotFound -> "No model found. Download one from Settings → Model Catalog."
+    is ModelStatus.PermissionRequired -> "Grant storage permission in device settings."
+    is ModelStatus.Downloading -> "Downloading model..."
 }

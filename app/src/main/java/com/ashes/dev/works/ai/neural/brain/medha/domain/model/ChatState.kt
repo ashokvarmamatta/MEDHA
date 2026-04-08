@@ -13,6 +13,7 @@ data class ChatState(
     val apiKey: String = "",
     val onlineModelName: String = "gemini-2.0-flash",
     val pendingImageUri: String? = null,
+    val pendingAudioUri: String? = null,
     val showPromptTemplates: Boolean = false,
     val pendingImageTemplate: PromptTemplate? = null,
     val showImageResponseStylePicker: Boolean = false,
@@ -21,5 +22,11 @@ data class ChatState(
     val isFetchingOnlineModels: Boolean = false,
     val isTestingApiKey: Boolean = false,
     val apiKeyValidated: Boolean = false,
-    val apiKeyTestResult: String? = null
+    val apiKeyTestResult: String? = null,
+    // Streaming state
+    val streamingText: String = "",
+    val streamingThinking: String = "",
+    val isThinking: Boolean = false,
+    // Model catalog download progress (modelId -> progress 0-100)
+    val catalogDownloadProgress: Map<String, Float> = emptyMap()
 )
