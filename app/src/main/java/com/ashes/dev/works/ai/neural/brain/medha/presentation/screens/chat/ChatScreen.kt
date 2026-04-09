@@ -58,6 +58,9 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedTextField
@@ -117,6 +120,8 @@ import com.ashes.dev.works.ai.neural.brain.medha.ui.theme.GradientStart
 import com.ashes.dev.works.ai.neural.brain.medha.ui.theme.StatusError
 import com.ashes.dev.works.ai.neural.brain.medha.ui.theme.StatusSuccess
 import com.ashes.dev.works.ai.neural.brain.medha.ui.theme.StatusWarning
+import com.ashes.dev.works.ai.neural.brain.medha.data.ModelCatalog
+import com.ashes.dev.works.ai.neural.brain.medha.domain.model.ModelInfo
 import com.ashes.dev.works.ai.neural.brain.medha.data.local.ChatSessionEntity
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -227,6 +232,22 @@ fun ChatScreen(
         )
     }
 
+    // Model configuration dialog
+    if (uiState.showConfigDialog) {
+        ModelConfigDialog(
+            currentTopK = viewModel.topK,
+            currentTopP = viewModel.topP,
+            currentTemperature = viewModel.temperature,
+            currentMaxTokens = viewModel.maxTokens,
+            currentEnableThinking = viewModel.enableThinking,
+            selectedModel = uiState.selectedModel,
+            onDismiss = { viewModel.hideConfigDialog() },
+            onApply = { topK, topP, temp, maxTok, gpu, thinking ->
+                viewModel.applyConfig(topK, topP, temp, maxTok, gpu, thinking)
+            }
+        )
+    }
+
     // Chat history bottom sheet
     if (showHistory) {
         ChatHistorySheet(
@@ -306,6 +327,12 @@ fun ChatScreen(
                         if (uiState.activeGrandMaster == null && uiState.activeCustomGrandMaster == null) {
                             IconButton(onClick = { viewModel.showGrandMasterPicker() }) {
                                 Text("\uD83C\uDFC6", fontSize = 20.sp)
+                            }
+                        }
+                        // Model config button (only in offline mode)
+                        if (uiState.appMode is AppMode.Offline) {
+                            IconButton(onClick = { viewModel.showConfigDialog() }) {
+                                Text("\u2699\uFE0F", fontSize = 18.sp)
                             }
                         }
                         if (uiState.messages.isNotEmpty()) {
@@ -1471,6 +1498,147 @@ private fun TypingIndicator() {
             }
         }
     }
+}
+
+@Composable
+private fun ModelConfigDialog(
+    currentTopK: Int,
+    currentTopP: Double,
+    currentTemperature: Double,
+    currentMaxTokens: Int,
+    currentEnableThinking: Boolean,
+    selectedModel: ModelInfo?,
+    onDismiss: () -> Unit,
+    onApply: (topK: Int, topP: Double, temperature: Double, maxTokens: Int, useGpu: Boolean, thinking: Boolean) -> Unit
+) {
+    val catalogModel = selectedModel?.let { ModelCatalog.findByFileName(it.fileName) }
+    val supportsGpu = catalogModel?.supportsGpu ?: false
+    val supportsThinking = catalogModel?.supportsThinking ?: false
+
+    var maxTokens by remember { mutableStateOf(currentMaxTokens.toFloat()) }
+    var topK by remember { mutableStateOf(currentTopK.toFloat()) }
+    var topP by remember { mutableStateOf(currentTopP.toFloat()) }
+    var temperature by remember { mutableStateOf(currentTemperature.toFloat()) }
+    var useGpu by remember { mutableStateOf(false) }
+    var enableThinking by remember { mutableStateOf(currentEnableThinking) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        title = {
+            Text("Configurations", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                // Max tokens
+                Text("Max tokens", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("${maxTokens.toInt()}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(40.dp))
+                    Slider(
+                        value = maxTokens,
+                        onValueChange = { maxTokens = it },
+                        valueRange = 256f..8192f,
+                        steps = 15,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text("${maxTokens.toInt()}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(40.dp))
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // TopK
+                Text("TopK", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("${topK.toInt()}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(40.dp))
+                    Slider(
+                        value = topK,
+                        onValueChange = { topK = it },
+                        valueRange = 1f..128f,
+                        steps = 126,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text("${topK.toInt()}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(40.dp))
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // TopP
+                Text("TopP", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("${"%.2f".format(topP)}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(40.dp))
+                    Slider(
+                        value = topP,
+                        onValueChange = { topP = it },
+                        valueRange = 0f..1f,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text("${"%.2f".format(topP)}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(40.dp))
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Temperature
+                Text("Temperature", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("${"%.2f".format(temperature)}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(40.dp))
+                    Slider(
+                        value = temperature,
+                        onValueChange = { temperature = it },
+                        valueRange = 0f..2f,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text("${"%.2f".format(temperature)}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(40.dp))
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Accelerator
+                Text("Accelerator", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = useGpu,
+                        onClick = { if (supportsGpu) useGpu = true },
+                        label = { Text("GPU") },
+                        enabled = supportsGpu,
+                        leadingIcon = if (useGpu) { { Text("\u2713", fontSize = 14.sp) } } else null
+                    )
+                    FilterChip(
+                        selected = !useGpu,
+                        onClick = { useGpu = false },
+                        label = { Text("CPU") },
+                        leadingIcon = if (!useGpu) { { Text("\u2713", fontSize = 14.sp) } } else null
+                    )
+                }
+                if (!supportsGpu) {
+                    Text("GPU not available for this model", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Enable thinking
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Enable thinking", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = enableThinking,
+                        onCheckedChange = { if (supportsThinking) enableThinking = it },
+                        enabled = supportsThinking
+                    )
+                }
+                if (!supportsThinking) {
+                    Text("Thinking not available for this model", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                onApply(topK.toInt(), topP.toDouble(), temperature.toDouble(), maxTokens.toInt(), useGpu, enableThinking)
+            }) { Text("OK") }
+        }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
