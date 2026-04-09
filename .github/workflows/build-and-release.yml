@@ -1,18 +1,8 @@
 name: Build & Release APK
 
 # ============================================================
-# HOW IT WORKS:
-#
-# JUST COMMIT & PUSH (any branch):
-#   → Nothing happens. No build, no release.
-#   → Your code is safely on GitHub.
-#
-# MERGE TO MASTER (PR merge / direct push to master):
-#   → Auto builds APK → creates tag → creates GitHub Release
-#   → APKs attached for users to download
-#
-# MANUAL (anytime):
-#   → Go to Actions tab → "Build & Release APK" → "Run workflow"
+# MASTER BRANCH — Automatic
+# Push/merge to master → builds APK → creates GitHub Release
 # ============================================================
 
 on:
@@ -22,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       release_name:
-        description: 'Release name (e.g. v1.0-beta)'
+        description: 'Release name (e.g. v2.0.0)'
         required: false
         default: ''
 
@@ -135,7 +125,7 @@ jobs:
             MEDHA-*-debug.apk
             MEDHA-*-release.apk
           body: |
-            ## MEDHA - AI Chat for Android
+            ## MEDHA - On-Device AI with Gemma 4
 
             ### Download & Install
             1. Download **`MEDHA-v${{ env.VERSION }}-debug.apk`** from assets below
