@@ -28,7 +28,7 @@ Most AI apps are just API wrappers — they send your data to a cloud server and
 
 For users who want faster or more capable responses, MEDHA also offers an **optional online mode** via Google Gemini API with multi-key failover. But the core experience is 100% offline.
 
-> This is an actively developed project. It has real features, real bugs, and real limitations. Built with Claude Code as an AI-assisted development tool — not a replacement for engineering decisions.
+> This is an actively developed project with real features, real bugs, and real limitations.
 
 ---
 
