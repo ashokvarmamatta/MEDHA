@@ -850,15 +850,23 @@ class ChatViewModel(
      * - Resize to max 512px
      * - PNG format (required by LiteRT LM Content.ImageBytes)
      */
+    /**
+     * Encode image as PNG for LiteRT LM Gemma 4 vision.
+     * - Target: 256px on longest side (keeps patch count very low ~200-300)
+     * - Dimensions rounded to nearest 16 (LiteRT LM alignment)
+     * - PNG format required by Content.ImageBytes
+     */
     private fun encodeImageToPng(uri: Uri): ByteArray? {
         return try {
+            // Step 1: Read dimensions without loading
             val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             application.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
             val origW = opts.outWidth
             val origH = opts.outHeight
             if (origW <= 0 || origH <= 0) return null
 
-            val targetSize = 512
+            // Step 2: Subsample to reduce memory
+            val targetSize = 256
             var sampleSize = 1
             while (origW / sampleSize > targetSize * 2 || origH / sampleSize > targetSize * 2) {
                 sampleSize *= 2
@@ -869,20 +877,18 @@ class ChatViewModel(
                 BitmapFactory.decodeStream(it, null, loadOpts)
             } ?: return null
 
+            // Step 3: Scale to target and round to 16px alignment
             val longest = maxOf(sampled.width, sampled.height)
-            val scaled = if (longest > targetSize) {
-                val scale = targetSize.toFloat() / longest
-                val newW = (sampled.width * scale).toInt().coerceAtLeast(1)
-                val newH = (sampled.height * scale).toInt().coerceAtLeast(1)
-                addLog(LogLevel.DEBUG, TAG, "Image: ${origW}x${origH} -> ${newW}x${newH}")
-                val result = Bitmap.createScaledBitmap(sampled, newW, newH, true)
-                if (result !== sampled) sampled.recycle()
-                result
-            } else {
-                addLog(LogLevel.DEBUG, TAG, "Image: ${origW}x${origH} -> ${sampled.width}x${sampled.height}")
-                sampled
-            }
+            val scale = if (longest > targetSize) targetSize.toFloat() / longest else 1f
+            val newW = ((sampled.width * scale).toInt().coerceAtLeast(16) / 16) * 16
+            val newH = ((sampled.height * scale).toInt().coerceAtLeast(16) / 16) * 16
 
+            addLog(LogLevel.DEBUG, TAG, "Image: ${origW}x${origH} -> subsample($sampleSize) -> ${sampled.width}x${sampled.height} -> ${newW}x${newH} (aligned)")
+
+            val scaled = Bitmap.createScaledBitmap(sampled, newW, newH, true)
+            if (scaled !== sampled) sampled.recycle()
+
+            // Step 4: Encode as PNG
             val out = ByteArrayOutputStream()
             scaled.compress(Bitmap.CompressFormat.PNG, 100, out)
             scaled.recycle()
