@@ -1400,22 +1400,37 @@ private fun MessageBubble(message: Message, viewModel: ChatViewModel, aiName: St
 
                 // Thinking text (collapsed, expandable)
                 if (!isUser && !message.thinkingText.isNullOrBlank()) {
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     var showThinking by remember { mutableStateOf(false) }
                     Surface(
                         onClick = { showThinking = !showThinking },
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                        shape = RoundedCornerShape(10.dp),
+                        color = AccentGold.copy(alpha = 0.08f)
                     ) {
-                        Column(modifier = Modifier.padding(8.dp)) {
-                            Text(
-                                if (showThinking) "\uD83E\uDDE0 Thinking \u25B2" else "\uD83E\uDDE0 Thinking \u25BC",
-                                fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
-                                color = textColor.copy(alpha = 0.5f)
-                            )
+                        Column(modifier = Modifier.fillMaxWidth().padding(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("\uD83E\uDDE0", fontSize = 12.sp)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    "Thinking",
+                                    fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                                    color = AccentGold.copy(alpha = 0.7f),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    if (showThinking) "\u25B2" else "\u25BC",
+                                    fontSize = 10.sp, color = textColor.copy(alpha = 0.4f)
+                                )
+                            }
                             if (showThinking) {
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(message.thinkingText, fontSize = 12.sp, color = textColor.copy(alpha = 0.6f))
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    message.thinkingText,
+                                    fontSize = 12.sp,
+                                    lineHeight = 18.sp,
+                                    color = textColor.copy(alpha = 0.6f),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
                             }
                         }
                     }
@@ -1750,51 +1765,54 @@ private fun ChatHistorySheet(
 @Composable
 private fun StreamingBubble(streamingText: String, thinkingText: String, isThinking: Boolean) {
     val textColor = MaterialTheme.colorScheme.onSecondaryContainer
+
     Column(
         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
         horizontalAlignment = Alignment.Start
     ) {
         Text("Medha", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f), modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
+
+        // Thinking bubble (separate, full width)
+        if (isThinking && thinkingText.isNotEmpty()) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                shape = RoundedCornerShape(16.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                modifier = Modifier.fillMaxWidth(0.9f).animateContentSize()
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("\uD83E\uDDE0", fontSize = 14.sp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Thinking...", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = AccentGold.copy(alpha = 0.8f))
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        thinkingText,
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp,
+                        color = textColor.copy(alpha = 0.55f),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+        }
+
+        // Response bubble
         Card(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
             shape = RoundedCornerShape(20.dp, 20.dp, 20.dp, 4.dp),
             elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-            modifier = Modifier.widthIn(max = 320.dp).animateContentSize()
+            modifier = Modifier.fillMaxWidth(0.85f).animateContentSize()
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
-                // Thinking indicator
-                if (isThinking && thinkingText.isNotEmpty()) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                    ) {
-                        Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("\uD83E\uDDE0", fontSize = 12.sp)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                thinkingText.takeLast(200),
-                                fontSize = 11.sp,
-                                color = textColor.copy(alpha = 0.5f),
-                                maxLines = 3,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                    if (streamingText.isNotEmpty()) Spacer(modifier = Modifier.height(8.dp))
-                }
-
-                // Streaming response text
                 if (streamingText.isNotEmpty()) {
                     Text(streamingText, style = MaterialTheme.typography.bodyLarge, color = textColor)
-                } else if (!isThinking) {
-                    // Show typing dots if no text yet
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Generating...", fontSize = 13.sp, color = textColor.copy(alpha = 0.5f))
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(14.dp),
-                            color = AccentCyan,
-                            strokeWidth = 1.5.dp
-                        )
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(14.dp), color = AccentCyan, strokeWidth = 1.5.dp)
+                        Text(if (isThinking) "Thinking..." else "Generating...", fontSize = 13.sp, color = textColor.copy(alpha = 0.5f))
                     }
                 }
             }
