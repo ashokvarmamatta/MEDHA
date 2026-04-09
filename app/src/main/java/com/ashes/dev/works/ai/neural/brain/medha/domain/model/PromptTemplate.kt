@@ -6,11 +6,18 @@ data class PromptTemplate(
     val description: String,
     val promptPrefix: String,
     val requiresInput: Boolean = true,
-    val category: TemplateCategory
+    val category: TemplateCategory,
+    val action: TemplateAction = TemplateAction.TEXT
 )
 
 enum class TemplateCategory {
-    WRITING, ANALYSIS, CODE, CREATIVE, UTILITY, IMAGE
+    WRITING, ANALYSIS, CODE, CREATIVE, UTILITY, IMAGE, AUDIO
+}
+
+enum class TemplateAction {
+    TEXT,           // Normal text prompt
+    PICK_IMAGE,     // Opens image picker first
+    PICK_AUDIO      // Opens audio picker first
 }
 
 object PromptTemplates {
@@ -158,22 +165,24 @@ object PromptTemplates {
             category = TemplateCategory.UTILITY
         ),
 
-        // Image
-        PromptTemplate(
-            icon = "\uD83D\uDDBC\uFE0F",
-            title = "Analyze Image",
-            description = "Describe and analyze an image",
-            promptPrefix = "Analyze this image in detail. Describe what you see, the context, and any notable elements.",
-            requiresInput = false,
-            category = TemplateCategory.IMAGE
-        ),
+        // Image — requires vision model or online
         PromptTemplate(
             icon = "\uD83D\uDCF7",
+            title = "Upload & Analyze Image",
+            description = "Pick an image and analyze it",
+            promptPrefix = "Analyze this image in detail. Describe what you see, the context, and any notable elements.",
+            requiresInput = false,
+            category = TemplateCategory.IMAGE,
+            action = TemplateAction.PICK_IMAGE
+        ),
+        PromptTemplate(
+            icon = "\uD83D\uDCDD",
             title = "Extract Text from Image",
             description = "OCR - Read text in an image",
             promptPrefix = "Extract and transcribe all visible text from this image. Format it neatly.",
             requiresInput = false,
-            category = TemplateCategory.IMAGE
+            category = TemplateCategory.IMAGE,
+            action = TemplateAction.PICK_IMAGE
         ),
         PromptTemplate(
             icon = "\uD83C\uDFA8",
@@ -181,7 +190,28 @@ object PromptTemplates {
             description = "Analyze the artistic style",
             promptPrefix = "Analyze the artistic style, techniques, colors, and composition of this image.",
             requiresInput = false,
-            category = TemplateCategory.IMAGE
+            category = TemplateCategory.IMAGE,
+            action = TemplateAction.PICK_IMAGE
+        ),
+
+        // Audio — requires audio-capable model
+        PromptTemplate(
+            icon = "\uD83C\uDFA4",
+            title = "Upload & Transcribe Audio",
+            description = "Pick an audio file and transcribe it",
+            promptPrefix = "Transcribe the audio and provide a summary of the content.",
+            requiresInput = false,
+            category = TemplateCategory.AUDIO,
+            action = TemplateAction.PICK_AUDIO
+        ),
+        PromptTemplate(
+            icon = "\uD83C\uDFB5",
+            title = "Analyze Audio",
+            description = "Describe what's in the audio",
+            promptPrefix = "Listen to this audio and describe what you hear in detail.",
+            requiresInput = false,
+            category = TemplateCategory.AUDIO,
+            action = TemplateAction.PICK_AUDIO
         )
     )
 }

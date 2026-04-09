@@ -94,9 +94,9 @@ fun AboutScreen(onNavigateBack: () -> Unit) {
 
             InfoSection("What is MEDHA?", Icons.Default.Info, AccentCyan) {
                 Text(
-                    text = "MEDHA (Machine-Enhanced Digital Human Assistant) is a dual-mode AI chat application. " +
-                            "It supports both Offline mode using Google's Gemma model via MediaPipe (on-device, fully private) " +
-                            "and Online mode using the Google Gemini API for more powerful responses when connected to the internet.",
+                    text = "MEDHA (Mobile Edge Device Hybrid AI) is an offline-first AI chat application. " +
+                            "It runs Gemma 4 models on-device via LiteRT LM for fully private conversations with vision, audio & thinking. " +
+                            "For enhanced capabilities, connect to online APIs like Google Gemini with multi-key failover.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
                 )
@@ -105,32 +105,32 @@ fun AboutScreen(onNavigateBack: () -> Unit) {
             Spacer(modifier = Modifier.height(16.dp))
 
             InfoSection("Key Features", Icons.Default.Star, AccentGold) {
-                FeatureItem("Dual Mode", "Switch between Offline (on-device) and Online (Gemini API)")
-                FeatureItem("Offline AI", "Run Gemma 2B locally with MediaPipe - no internet needed")
-                FeatureItem("Online AI", "Access Google Gemini for powerful cloud-based responses")
-                FeatureItem("Model Selection", "Choose from multiple offline models in your Downloads folder")
+                FeatureItem("Offline First", "Run Gemma 4 locally with LiteRT LM - vision, audio & thinking")
+                FeatureItem("Online Mode", "Connect to Gemini API with multi-key failover")
+                FeatureItem("Grand Masters", "Specialized AI personas - Chess, Health, Code, Career + create your own")
+                FeatureItem("Chat Persistence", "Grand Master chats are saved - resume or start fresh anytime")
+                FeatureItem("Custom Grand Masters", "Create your own AI expert via form or JSON configuration")
+                FeatureItem("Image Analysis", "Upload images for AI-powered analysis, OCR, and descriptions")
+                FeatureItem("22 Prompt Templates", "One-tap templates across 6 categories")
                 FeatureItem("Private & Secure", "Offline mode keeps all data on your device")
-                FeatureItem("Detailed Logging", "Monitor engine status, errors, and performance")
-                FeatureItem("Premium UI", "Rich, animated chat experience with dark/light theme")
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
             InfoSection("Offline Setup", Icons.Default.Build, AccentGreen) {
-                GuideStep("1", "Download Model", "Get a Gemma .bin model file from Kaggle or MediaPipe repository.")
-                GuideStep("2", "Place in Downloads", "Move the model file to your device's Downloads folder.")
-                GuideStep("3", "Grant Permission", "Allow 'All Files Access' so the app can read the model.")
-                GuideStep("4", "Select Model", "Go to Settings > Offline Models to pick your model.")
-                GuideStep("5", "Start Chatting", "The engine loads automatically. Type your first message!")
+                GuideStep("1", "Download Model", "Download a .litertlm model from Settings \u2192 Model Catalog.")
+                GuideStep("2", "Import Model", "Go to Settings > Offline Models and tap 'Import Model File'.")
+                GuideStep("3", "Select Model", "Pick the imported model from the list.")
+                GuideStep("4", "Start Chatting", "The engine loads automatically. Type your first message!")
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
             InfoSection("Online Setup", Icons.Default.Build, AccentCyan) {
-                GuideStep("1", "Get API Key", "Visit aistudio.google.com and create a free Gemini API key.")
-                GuideStep("2", "Open Settings", "Go to Settings and switch to Online Mode.")
-                GuideStep("3", "Enter API Key", "Paste your API key and tap the checkmark to save.")
-                GuideStep("4", "Start Chatting", "You're connected to Gemini - ask anything!")
+                GuideStep("1", "Get API Key", "Go to Settings for a list of free & paid API key providers.")
+                GuideStep("2", "Switch Mode", "Go to Settings and switch to Online Mode.")
+                GuideStep("3", "Add API Key", "Paste your key, add a label, and test it.")
+                GuideStep("4", "Start Chatting", "Select a model and start chatting!")
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -140,19 +140,19 @@ fun AboutScreen(onNavigateBack: () -> Unit) {
                 TipItem("Online mode provides more accurate and detailed responses")
                 TipItem("Offline mode works best with English and simple questions")
                 TipItem("First offline load takes 30-60 seconds depending on device")
+                TipItem("Use Grand Masters for focused, expert-level conversations")
+                TipItem("Go to Settings for model download links and API key providers")
                 TipItem("Use the Logs screen to diagnose any issues")
-                TipItem("Offline model uses ~1.5GB RAM when active")
-                TipItem("Multiple .bin files in Downloads? Pick the best one in Settings")
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
             InfoSection("Limitations", Icons.Default.Warning, AccentGold) {
-                TipItem("Offline: Gemma 2B is compact - may produce inaccurate responses")
+                TipItem("Offline: On-device models may produce less accurate responses than cloud")
                 TipItem("Offline: Complex reasoning and math may not be reliable")
                 TipItem("Online: Requires active internet connection")
-                TipItem("Online: API key is stored locally (not encrypted)")
-                TipItem("Chat history is in-memory only - cleared on app restart")
+                TipItem("Online: API keys are stored locally (not encrypted)")
+                TipItem("Currently supports Gemini API format - other providers coming soon")
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -160,9 +160,9 @@ fun AboutScreen(onNavigateBack: () -> Unit) {
             InfoSection("Privacy & Data", Icons.Default.Lock, AccentCyan) {
                 Text(
                     text = "In Offline mode, MEDHA processes everything on your device. No data leaves your phone. " +
-                            "In Online mode, your prompts are sent to Google's Gemini API servers for processing. " +
-                            "Your API key is stored locally on your device. Chat history exists only in memory " +
-                            "and is discarded when you close the app.",
+                            "In Online mode, your prompts are sent to the API provider's servers for processing. " +
+                            "API keys and Grand Master chat history are stored locally on your device via DataStore. " +
+                            "Custom Grand Master configurations are also stored locally.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
                 )
@@ -171,8 +171,8 @@ fun AboutScreen(onNavigateBack: () -> Unit) {
             Spacer(modifier = Modifier.height(24.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
             Spacer(modifier = Modifier.height(16.dp))
-            Text("Built with Jetpack Compose & MediaPipe", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f), textAlign = TextAlign.Center)
-            Text("Gemma 2B by Google \u2022 Gemini API by Google", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f), textAlign = TextAlign.Center)
+            Text("Built with Jetpack Compose & LiteRT LM", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f), textAlign = TextAlign.Center)
+            Text("Gemma 4 by Google \u2022 LiteRT LM \u2022 Gemini API by Google", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f), textAlign = TextAlign.Center)
             Spacer(modifier = Modifier.height(24.dp))
         }
     }
