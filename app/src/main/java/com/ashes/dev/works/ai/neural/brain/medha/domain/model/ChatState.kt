@@ -53,6 +53,6 @@ data class ChatState(
 
     /** Image input: online always, offline with Gemma 4 vision models (needs visionBackend=GPU) */
     val supportsImageInput: Boolean get() = appMode is AppMode.Online || (selectedModel?.supportsImage == true)
-    /** Whether current mode supports audio input (online only for now) */
-    val supportsAudioInput: Boolean get() = appMode is AppMode.Online
+    /** Whether current mode supports audio input (online, or offline with audio-capable models) */
+    val supportsAudioInput: Boolean get() = appMode is AppMode.Online || (selectedModel?.supportsAudio == true)
 }

@@ -46,7 +46,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
@@ -58,6 +60,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -139,6 +143,7 @@ fun ChatScreen(
     val chatSessions by viewModel.chatSessions.collectAsState(initial = emptyList())
     var prompt by remember { mutableStateOf("") }
     var showHistory by remember { mutableStateOf(false) }
+    var showOverflowMenu by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
@@ -313,43 +318,60 @@ fun ChatScreen(
                         }
                     },
                     actions = {
-                        // New chat button
+                        // Primary: New Chat (only when messages exist)
                         if (uiState.messages.isNotEmpty()) {
                             IconButton(onClick = { viewModel.startNewChat() }) {
-                                Text("\u2795", fontSize = 16.sp)
+                                Icon(Icons.Default.Add, "New chat", tint = MaterialTheme.colorScheme.primary)
                             }
                         }
-                        // Chat history button
-                        IconButton(onClick = { showHistory = true }) {
-                            Text("\uD83D\uDCCB", fontSize = 18.sp)
-                        }
-                        // Grand Master picker button
+
+                        // Primary: Grand Masters (when not in GM session)
                         if (uiState.activeGrandMaster == null && uiState.activeCustomGrandMaster == null) {
                             IconButton(onClick = { viewModel.showGrandMasterPicker() }) {
-                                Text("\uD83C\uDFC6", fontSize = 20.sp)
+                                Text("\uD83C\uDFC6", fontSize = 18.sp)
                             }
                         }
-                        // Model config button (only in offline mode)
-                        if (uiState.appMode is AppMode.Offline) {
-                            IconButton(onClick = { viewModel.showConfigDialog() }) {
-                                Text("\u2699\uFE0F", fontSize = 18.sp)
+
+                        // Overflow menu for everything else
+                        Box {
+                            IconButton(onClick = { showOverflowMenu = true }) {
+                                Icon(Icons.Default.MoreVert, "More", tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
                             }
-                        }
-                        if (uiState.messages.isNotEmpty()) {
-                            IconButton(onClick = { viewModel.clearChat() }) {
-                                Icon(Icons.Default.Delete, "Clear", tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                            DropdownMenu(
+                                expanded = showOverflowMenu,
+                                onDismissRequest = { showOverflowMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("\uD83D\uDCCB  Chat History") },
+                                    onClick = { showOverflowMenu = false; showHistory = true }
+                                )
+                                if (uiState.appMode is AppMode.Offline) {
+                                    DropdownMenuItem(
+                                        text = { Text("\u2699\uFE0F  Configurations") },
+                                        onClick = { showOverflowMenu = false; viewModel.showConfigDialog() }
+                                    )
+                                }
+                                if (uiState.messages.isNotEmpty()) {
+                                    DropdownMenuItem(
+                                        text = { Text("\uD83D\uDDD1\uFE0F  Clear Chat") },
+                                        onClick = { showOverflowMenu = false; viewModel.clearChat() }
+                                    )
+                                }
+                                if (uiState.modelStatus is ModelStatus.Error || uiState.modelStatus is ModelStatus.ModelNotFound) {
+                                    DropdownMenuItem(
+                                        text = { Text("\uD83D\uDD04  Retry Engine") },
+                                        onClick = { showOverflowMenu = false; viewModel.initializeEngine() }
+                                    )
+                                }
+                                DropdownMenuItem(
+                                    text = { Text("\u2699\uFE0F  Settings") },
+                                    onClick = { showOverflowMenu = false; onNavigateToSettings() }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("\u2139\uFE0F  About") },
+                                    onClick = { showOverflowMenu = false; onNavigateToAbout() }
+                                )
                             }
-                        }
-                        if (uiState.modelStatus is ModelStatus.Error || uiState.modelStatus is ModelStatus.ModelNotFound || uiState.modelStatus is ModelStatus.PermissionRequired) {
-                            IconButton(onClick = { viewModel.initializeEngine() }) {
-                                Icon(Icons.Default.Refresh, "Retry", tint = StatusWarning)
-                            }
-                        }
-                        IconButton(onClick = onNavigateToSettings) {
-                            Icon(Icons.Default.Settings, "Settings", tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-                        }
-                        IconButton(onClick = onNavigateToAbout) {
-                            Icon(Icons.Default.Info, "About", tint = MaterialTheme.colorScheme.primary)
                         }
                     }
                 )
