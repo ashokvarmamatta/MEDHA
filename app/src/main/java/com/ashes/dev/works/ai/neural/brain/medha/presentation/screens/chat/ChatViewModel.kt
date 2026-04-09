@@ -1441,6 +1441,23 @@ class ChatViewModel(
     }
 
     fun togglePromptTemplates() { _uiState.update { it.copy(showPromptTemplates = !it.showPromptTemplates) } }
+
+    // ── Model Configuration Dialog ──────────────────────────────
+    fun showConfigDialog() { _uiState.update { it.copy(showConfigDialog = true) } }
+    fun hideConfigDialog() { _uiState.update { it.copy(showConfigDialog = false) } }
+
+    fun applyConfig(newTopK: Int, newTopP: Double, newTemperature: Double, newMaxTokens: Int, useGpu: Boolean, thinking: Boolean) {
+        topK = newTopK
+        topP = newTopP
+        temperature = newTemperature
+        maxTokens = newMaxTokens
+        enableThinking = thinking
+        _uiState.update { it.copy(showConfigDialog = false) }
+        addLog(LogLevel.INFO, TAG, "Config updated: topK=$topK topP=$topP temp=$temperature maxTokens=$maxTokens gpu=$useGpu thinking=$thinking")
+        // Reinitialize engine with new config
+        destroyEngine()
+        initializeEngine()
+    }
     fun hidePromptTemplates() { _uiState.update { it.copy(showPromptTemplates = false) } }
 
     // ── Chat History ──────────────────────────────────────────────────
