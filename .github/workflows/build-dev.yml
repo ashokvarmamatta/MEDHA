@@ -1,0 +1,104 @@
+name: Build Dev APK
+
+# ============================================================
+# DEV BRANCH — Manual Only
+# Go to Actions tab → "Build Dev APK" → "Run workflow"
+# Does NOT auto-trigger on push
+# ============================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_name:
+        description: 'Release name (e.g. v2.1.0-dev)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build-dev:
+    name: Build Dev APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x ./gradlew
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Get version and prepare APK
+        id: apk_info
+        run: |
+          VERSION=$(grep 'versionName' app/build.gradle.kts | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          cp app/build/outputs/apk/debug/app-debug.apk MEDHA-v${VERSION}-dev.apk
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Upload Dev APK as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MEDHA-dev-apk
+          path: MEDHA-*-dev.apk
+          retention-days: 30
+
+      - name: Generate release tag
+        id: release_tag
+        if: ${{ github.event.inputs.release_name != '' }}
+        run: |
+          TAG="${{ github.event.inputs.release_name }}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          echo "commit_msg<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMIT_MSG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Dev Pre-release
+        if: ${{ github.event.inputs.release_name != '' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_tag.outputs.tag }}
+          name: "MEDHA ${{ steps.release_tag.outputs.tag }} (Dev)"
+          draft: false
+          prerelease: true
+          files: MEDHA-*-dev.apk
+          body: |
+            ## MEDHA Dev Build
+
+            **This is a development build — may contain bugs.**
+
+            ### Latest Changes
+            ```
+            ${{ steps.release_tag.outputs.commit_msg }}
+            ```
+
+            ---
+            > Built manually from `dev` branch at commit `${{ github.sha }}`
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
