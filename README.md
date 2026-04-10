@@ -4,7 +4,7 @@
 
 ### On-Device AI with Gemma 4 — Vision, Audio, Thinking. 100% Offline.
 
-<img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&weight=500&size=18&pause=1000&color=00D4AA&center=true&vCenter=true&width=500&lines=Gemma+4+running+on+your+phone;Vision+%E2%80%94+analyze+images+offline;Thinking+mode+%E2%80%94+chain+of+thought;32K+context+window;No+internet+needed;100%25+private+%E2%80%94+nothing+leaves+your+phone" />
+<img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&weight=500&size=18&pause=1000&color=00D4AA&center=true&vCenter=true&width=550&lines=Gemma+4+running+on+your+phone;Vision+%E2%80%94+analyze+images+offline;Thinking+mode+%E2%80%94+chain+of+thought;32K+context+window;140%2B+languages+supported;Pick+output+language+%E2%80%94+45%2B+options;No+internet+needed;100%25+private+%E2%80%94+nothing+leaves+your+phone" />
 
 <br/>
 
@@ -78,6 +78,8 @@ For users who want faster or more capable responses, MEDHA also offers an **opti
 | 👁️ **On-Device Vision** | Analyze images, OCR, describe art — fully offline via `visionBackend = GPU` |
 | 🎤 **Audio Input** | Process audio files on-device with audio-capable models |
 | 💭 **Thinking Mode** | Chain-of-thought reasoning — watch the model think in real-time |
+| 🌐 **140+ Languages** | Pre-trained on 140+ languages, 35+ ready out-of-the-box |
+| 🗣️ **Output Language Lock** | Pick from 45+ languages — AI replies ONLY in chosen language (input auto-detected) |
 | ⚡ **Streaming** | Token-by-token response display as the model generates |
 | 📊 **Token Stats** | Tokens, tok/s, latency, TTFT, provider badge on every response |
 
