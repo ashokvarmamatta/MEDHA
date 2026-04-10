@@ -270,7 +270,11 @@ class ChatViewModel(
     }
 
     fun selectModel(model: ModelInfo) {
-        if (_uiState.value.selectedModel?.filePath == model.filePath) return
+        val sameModel = _uiState.value.selectedModel?.filePath == model.filePath
+        val currentStatus = _uiState.value.modelStatus
+        // Re-init even if same model when status indicates not loaded (e.g. ModelNotFound after download)
+        val needsReinit = !sameModel || currentStatus is ModelStatus.ModelNotFound || currentStatus is ModelStatus.Error || currentStatus is ModelStatus.Idle
+        if (sameModel && !needsReinit) return
         addLog(LogLevel.INFO, TAG, "Switching to: ${model.fileName}")
         _uiState.update { it.copy(selectedModel = model) }
         if (_uiState.value.appMode is AppMode.Offline) {
@@ -1076,6 +1080,8 @@ class ChatViewModel(
 
     fun downloadCatalogModel(catalogModel: CatalogModel) {
         viewModelScope.launch(Dispatchers.IO) {
+            // Start foreground service so the OS doesn't kill the download when app is minimized
+            try { MedhaService.start(application) } catch (_: Exception) {}
             try {
                 _uiState.update { it.copy(catalogDownloadProgress = it.catalogDownloadProgress + (catalogModel.id to 0f)) }
                 addLog(LogLevel.INFO, TAG, "Downloading ${catalogModel.name} (${catalogModel.sizeLabel})...")
@@ -1161,7 +1167,13 @@ class ChatViewModel(
         val file = File(modelsDir(), catalogModel.fileName)
         if (!file.exists()) return
         val info = ModelInfo.fromFileName(file.name, file.absolutePath, file.length())
-        selectModel(info)
+        // Refresh available models list and force engine reload
+        scanAvailableModels()
+        _uiState.update { it.copy(selectedModel = info, modelStatus = ModelStatus.Initializing) }
+        if (_uiState.value.appMode is AppMode.Offline) {
+            destroyEngine()
+            initializeEngine()
+        }
     }
 
     // ── Grand Master ────────────────────────────────────────────────
