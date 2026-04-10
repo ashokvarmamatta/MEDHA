@@ -107,6 +107,7 @@ class ChatViewModel(
     var temperature: Double = 1.0
     var maxTokens: Int = 4096
     var enableThinking: Boolean = false
+    var outputLanguage: String = "Auto"  // "Auto" = no enforcement, otherwise force responses in that language
 
     init {
         addLog(LogLevel.INFO, TAG, "MEDHA AI Engine v$APP_VERSION starting (LiteRT LM)...")
@@ -758,11 +759,15 @@ class ChatViewModel(
 
                 val gmSystemPrompt = _uiState.value.activeGrandMaster?.systemPrompt
                     ?: _uiState.value.activeCustomGrandMaster?.systemPrompt
-                val textPrompt = when {
+                val langInstruction = if (outputLanguage != "Auto") {
+                    "IMPORTANT: You MUST respond ONLY in $outputLanguage language, regardless of the input language. "
+                } else ""
+                val basePrompt = when {
                     imageUri != null && prompt.isBlank() -> "Describe this image in detail."
                     gmSystemPrompt != null -> "$gmSystemPrompt\n\nUser: $prompt\nAssistant:"
                     else -> prompt
                 }
+                val textPrompt = if (langInstruction.isNotEmpty()) "$langInstruction\n\n$basePrompt" else basePrompt
                 contentParts.add(Content.Text(textPrompt))
 
                 val contents = Contents.of(contentParts)
@@ -850,23 +855,15 @@ class ChatViewModel(
      * - Resize to max 512px
      * - PNG format (required by LiteRT LM Content.ImageBytes)
      */
-    /**
-     * Encode image as PNG for LiteRT LM Gemma 4 vision.
-     * - Target: 256px on longest side (keeps patch count very low ~200-300)
-     * - Dimensions rounded to nearest 16 (LiteRT LM alignment)
-     * - PNG format required by Content.ImageBytes
-     */
     private fun encodeImageToPng(uri: Uri): ByteArray? {
         return try {
-            // Step 1: Read dimensions without loading
             val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             application.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
             val origW = opts.outWidth
             val origH = opts.outHeight
             if (origW <= 0 || origH <= 0) return null
 
-            // Step 2: Subsample to reduce memory
-            val targetSize = 256
+            val targetSize = 512
             var sampleSize = 1
             while (origW / sampleSize > targetSize * 2 || origH / sampleSize > targetSize * 2) {
                 sampleSize *= 2
@@ -877,18 +874,20 @@ class ChatViewModel(
                 BitmapFactory.decodeStream(it, null, loadOpts)
             } ?: return null
 
-            // Step 3: Scale to target and round to 16px alignment
             val longest = maxOf(sampled.width, sampled.height)
-            val scale = if (longest > targetSize) targetSize.toFloat() / longest else 1f
-            val newW = ((sampled.width * scale).toInt().coerceAtLeast(16) / 16) * 16
-            val newH = ((sampled.height * scale).toInt().coerceAtLeast(16) / 16) * 16
+            val scaled = if (longest > targetSize) {
+                val scale = targetSize.toFloat() / longest
+                val newW = (sampled.width * scale).toInt().coerceAtLeast(1)
+                val newH = (sampled.height * scale).toInt().coerceAtLeast(1)
+                addLog(LogLevel.DEBUG, TAG, "Image: ${origW}x${origH} -> ${newW}x${newH}")
+                val result = Bitmap.createScaledBitmap(sampled, newW, newH, true)
+                if (result !== sampled) sampled.recycle()
+                result
+            } else {
+                addLog(LogLevel.DEBUG, TAG, "Image: ${origW}x${origH} -> ${sampled.width}x${sampled.height}")
+                sampled
+            }
 
-            addLog(LogLevel.DEBUG, TAG, "Image: ${origW}x${origH} -> subsample($sampleSize) -> ${sampled.width}x${sampled.height} -> ${newW}x${newH} (aligned)")
-
-            val scaled = Bitmap.createScaledBitmap(sampled, newW, newH, true)
-            if (scaled !== sampled) sampled.recycle()
-
-            // Step 4: Encode as PNG
             val out = ByteArrayOutputStream()
             scaled.compress(Bitmap.CompressFormat.PNG, 100, out)
             scaled.recycle()
@@ -942,6 +941,11 @@ class ChatViewModel(
                 if (gmSystemPrompt != null) {
                     contents.add(GeminiContent(role = "user", parts = listOf(GeminiPart(text = "System instruction: $gmSystemPrompt"))))
                     contents.add(GeminiContent(role = "model", parts = listOf(GeminiPart(text = "Understood. I will act as the $gmTitle as instructed."))))
+                }
+                // Output language enforcement
+                if (outputLanguage != "Auto") {
+                    contents.add(GeminiContent(role = "user", parts = listOf(GeminiPart(text = "IMPORTANT: For all my future messages, you MUST respond ONLY in $outputLanguage language regardless of what language I write in. This is a strict requirement."))))
+                    contents.add(GeminiContent(role = "model", parts = listOf(GeminiPart(text = "Understood. I will respond exclusively in $outputLanguage from now on."))))
                 }
 
                 val prevMessages = _uiState.value.messages.dropLast(1)
@@ -1452,14 +1456,15 @@ class ChatViewModel(
     fun showConfigDialog() { _uiState.update { it.copy(showConfigDialog = true) } }
     fun hideConfigDialog() { _uiState.update { it.copy(showConfigDialog = false) } }
 
-    fun applyConfig(newTopK: Int, newTopP: Double, newTemperature: Double, newMaxTokens: Int, useGpu: Boolean, thinking: Boolean) {
+    fun applyConfig(newTopK: Int, newTopP: Double, newTemperature: Double, newMaxTokens: Int, useGpu: Boolean, thinking: Boolean, language: String = "Auto") {
         topK = newTopK
         topP = newTopP
         temperature = newTemperature
         maxTokens = newMaxTokens
         enableThinking = thinking
+        outputLanguage = language
         _uiState.update { it.copy(showConfigDialog = false) }
-        addLog(LogLevel.INFO, TAG, "Config updated: topK=$topK topP=$topP temp=$temperature maxTokens=$maxTokens gpu=$useGpu thinking=$thinking")
+        addLog(LogLevel.INFO, TAG, "Config updated: topK=$topK topP=$topP temp=$temperature maxTokens=$maxTokens gpu=$useGpu thinking=$thinking lang=$language")
         // Reinitialize engine with new config
         destroyEngine()
         initializeEngine()

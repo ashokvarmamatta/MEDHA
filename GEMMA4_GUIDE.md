@@ -6,7 +6,7 @@ Run Gemma 4 On Your Android Phone — Complete Beginner's Guide (LiteRT LM SDK, 
 
 ### The Complete Beginner's Guide — From Zero to On-Device AI
 
-<img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&weight=600&size=20&pause=1000&color=4285F4&center=true&vCenter=true&width=600&lines=No+internet+needed+after+download;32K+context+window;Streaming+token-by-token;Thinking+mode+(chain-of-thought);Vision+%2B+Audio+support;100%25+private+%E2%80%94+nothing+leaves+your+phone" alt="Typing SVG" />
+<img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&weight=600&size=20&pause=1000&color=4285F4&center=true&vCenter=true&width=600&lines=No+internet+needed+after+download;32K+context+window;Streaming+token-by-token;Thinking+mode+(chain-of-thought);Vision+%2B+Audio+support;140%2B+languages+supported;100%25+private+%E2%80%94+nothing+leaves+your+phone" alt="Typing SVG" />
 
 <br/>
 
@@ -71,8 +71,8 @@ You see the reply                    You see the reply
 
 | Model | Size | RAM Needed | What It Can Do | Best For |
 |-------|------|-----------|----------------|----------|
-| 🥇 **Gemma 4 E2B** | **2.6 GB** | 8 GB | Text + Vision + Audio + Thinking | **Most phones. Start here.** |
-| 🥈 **Gemma 4 E4B** | 3.7 GB | 12 GB | Same but smarter | Flagship phones (Pixel 9, S25 Ultra) |
+| 🥇 **Gemma 4 E2B** | **2.6 GB** | 8 GB | Text + Vision + Audio + Thinking + 140 languages | **Most phones. Start here.** |
+| 🥈 **Gemma 4 E4B** | 3.7 GB | 12 GB | Same but smarter, 140 languages | Flagship phones (Pixel 9, S25 Ultra) |
 | 🥉 **Gemma 3n E2B** | 3.7 GB | 8 GB | Text + Vision + Audio (no thinking) | Previous gen, still solid |
 | ⚡ **Gemma 3 1B** | 584 MB | 6 GB | Text only | Low-end phones, fast responses |
 | 🧪 **DeepSeek R1 1.5B** | 1.8 GB | 6 GB | Text only (reasoning) | Logical/math tasks |

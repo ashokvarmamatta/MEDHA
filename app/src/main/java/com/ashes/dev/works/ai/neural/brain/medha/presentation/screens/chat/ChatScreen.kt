@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -245,10 +246,11 @@ fun ChatScreen(
             currentTemperature = viewModel.temperature,
             currentMaxTokens = viewModel.maxTokens,
             currentEnableThinking = viewModel.enableThinking,
+            currentLanguage = viewModel.outputLanguage,
             selectedModel = uiState.selectedModel,
             onDismiss = { viewModel.hideConfigDialog() },
-            onApply = { topK, topP, temp, maxTok, gpu, thinking ->
-                viewModel.applyConfig(topK, topP, temp, maxTok, gpu, thinking)
+            onApply = { topK, topP, temp, maxTok, gpu, thinking, language ->
+                viewModel.applyConfig(topK, topP, temp, maxTok, gpu, thinking, language)
             }
         )
     }
@@ -1544,9 +1546,10 @@ private fun ModelConfigDialog(
     currentTemperature: Double,
     currentMaxTokens: Int,
     currentEnableThinking: Boolean,
+    currentLanguage: String,
     selectedModel: ModelInfo?,
     onDismiss: () -> Unit,
-    onApply: (topK: Int, topP: Double, temperature: Double, maxTokens: Int, useGpu: Boolean, thinking: Boolean) -> Unit
+    onApply: (topK: Int, topP: Double, temperature: Double, maxTokens: Int, useGpu: Boolean, thinking: Boolean, language: String) -> Unit
 ) {
     val catalogModel = selectedModel?.let { ModelCatalog.findByFileName(it.fileName) }
     val supportsGpu = catalogModel?.supportsGpu ?: false
@@ -1558,6 +1561,8 @@ private fun ModelConfigDialog(
     var temperature by remember { mutableStateOf(currentTemperature.toFloat()) }
     var useGpu by remember { mutableStateOf(false) }
     var enableThinking by remember { mutableStateOf(currentEnableThinking) }
+    var outputLanguage by remember { mutableStateOf(currentLanguage) }
+    var showLanguageMenu by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1665,6 +1670,48 @@ private fun ModelConfigDialog(
                 if (!supportsThinking) {
                     Text("Thinking not available for this model", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Output language picker
+                Text("Output language", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(4.dp))
+                Box {
+                    Surface(
+                        onClick = { showLanguageMenu = true },
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("\uD83C\uDF10", fontSize = 16.sp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(outputLanguage, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
+                            Text("\u25BC", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                        }
+                    }
+                    DropdownMenu(
+                        expanded = showLanguageMenu,
+                        onDismissRequest = { showLanguageMenu = false },
+                        modifier = Modifier.heightIn(max = 400.dp)
+                    ) {
+                        SUPPORTED_LANGUAGES.forEach { lang ->
+                            DropdownMenuItem(
+                                text = { Text(lang) },
+                                onClick = {
+                                    outputLanguage = lang
+                                    showLanguageMenu = false
+                                }
+                            )
+                        }
+                    }
+                }
+                Text(
+                    if (outputLanguage == "Auto") "AI replies in the input language"
+                    else "AI will reply ONLY in $outputLanguage",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                )
             }
         },
         dismissButton = {
@@ -1672,11 +1719,22 @@ private fun ModelConfigDialog(
         },
         confirmButton = {
             TextButton(onClick = {
-                onApply(topK.toInt(), topP.toDouble(), temperature.toDouble(), maxTokens.toInt(), useGpu, enableThinking)
+                onApply(topK.toInt(), topP.toDouble(), temperature.toDouble(), maxTokens.toInt(), useGpu, enableThinking, outputLanguage)
             }) { Text("OK") }
         }
     )
 }
+
+private val SUPPORTED_LANGUAGES = listOf(
+    "Auto",
+    "English", "Spanish", "French", "German", "Italian", "Portuguese",
+    "Russian", "Chinese (Simplified)", "Chinese (Traditional)", "Japanese", "Korean",
+    "Arabic", "Hindi", "Bengali", "Tamil", "Telugu", "Marathi", "Gujarati", "Punjabi", "Urdu",
+    "Turkish", "Vietnamese", "Thai", "Indonesian", "Malay", "Filipino",
+    "Dutch", "Polish", "Swedish", "Norwegian", "Danish", "Finnish",
+    "Greek", "Hebrew", "Czech", "Romanian", "Hungarian", "Ukrainian", "Persian (Farsi)",
+    "Swahili", "Catalan", "Bulgarian", "Slovak", "Croatian", "Serbian"
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
