@@ -41,7 +41,7 @@ object ModelCatalog {
     val models = listOf(
         CatalogModel(
             id = "gemma-4-e2b", name = "Gemma 4 E2B",
-            description = "Google's latest. Vision, audio, thinking mode. Best all-rounder.",
+            description = "Google's latest. Vision, audio, thinking. 140+ languages. Best all-rounder.",
             sizeBytes = 2_583_085_056L, fileName = "gemma-4-E2B-it.litertlm",
             huggingFaceRepo = "litert-community/gemma-4-E2B-it-litert-lm",
             supportsImage = true, supportsAudio = true, supportsThinking = true,
@@ -51,7 +51,7 @@ object ModelCatalog {
         ),
         CatalogModel(
             id = "gemma-4-e4b", name = "Gemma 4 E4B",
-            description = "Larger Gemma 4. Smarter but needs 12GB RAM.",
+            description = "Larger Gemma 4. 140+ languages. Smarter but needs 12GB RAM.",
             sizeBytes = 3_654_467_584L, fileName = "gemma-4-E4B-it.litertlm",
             huggingFaceRepo = "litert-community/gemma-4-E4B-it-litert-lm",
             supportsImage = true, supportsAudio = true, supportsThinking = true,

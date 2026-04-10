@@ -85,8 +85,8 @@ For users who want faster or more capable responses, MEDHA also offers an **opti
 
 | Model | Size | Capabilities | Best For |
 |-------|------|-------------|----------|
-| 🥇 **Gemma 4 E2B** | 2.6 GB | Text + Vision + Audio + Thinking | Most phones (8GB+ RAM) |
-| 🥈 **Gemma 4 E4B** | 3.7 GB | Text + Vision + Audio + Thinking | Flagship phones (12GB+ RAM) |
+| 🥇 **Gemma 4 E2B** | 2.6 GB | Text + Vision + Audio + Thinking + 140 languages | Most phones (8GB+ RAM) |
+| 🥈 **Gemma 4 E4B** | 3.7 GB | Text + Vision + Audio + Thinking + 140 languages | Flagship phones (12GB+ RAM) |
 | 🥉 **Gemma 3n E2B** | 3.7 GB | Text + Vision + Audio | Previous gen, still solid |
 | 🪶 **Gemma 3 1B** | 584 MB | Text only | Low-end phones (6GB RAM) |
 | 🧪 **DeepSeek R1 1.5B** | 1.8 GB | Text + Reasoning | Reasoning tasks |
@@ -103,6 +103,7 @@ For users who want faster or more capable responses, MEDHA also offers an **opti
 | 🌡️ **Temperature** | 0.00 — 2.00 | Creativity vs accuracy |
 | 🖥️ **Accelerator** | GPU / CPU | Inference backend |
 | 💭 **Enable Thinking** | On / Off | Chain-of-thought mode |
+| 🌐 **Output Language** | 45+ languages | Force AI to reply in a specific language (input auto-detected) |
 
 ---
 
