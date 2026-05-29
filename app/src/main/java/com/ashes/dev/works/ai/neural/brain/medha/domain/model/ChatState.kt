@@ -45,14 +45,19 @@ data class ChatState(
     val customGrandMasters: List<CustomGrandMaster> = emptyList(),
     val showCreateGrandMaster: Boolean = false,
     // Model config dialog
-    val showConfigDialog: Boolean = false
+    val showConfigDialog: Boolean = false,
+    // Whether the loaded offline engine actually brought up its vision/audio
+    // encoder. False when the model claims support but the runtime fell back to
+    // text-only (e.g. an incompatible vision encoder). Defaults true until proven otherwise.
+    val offlineVisionAvailable: Boolean = true,
+    val offlineAudioAvailable: Boolean = true
 ) {
     val hasAnyValidatedKey: Boolean get() = apiKeys.any { it.isValidated && it.isEnabled }
     val validatedKeys: List<ApiKeyEntry> get() = apiKeys.filter { it.isValidated && it.isEnabled }
     val activeKey: ApiKeyEntry? get() = validatedKeys.getOrNull(activeKeyIndex.coerceIn(0, (validatedKeys.size - 1).coerceAtLeast(0)))
 
-    /** Image input: online always, offline with Gemma 4 vision models (needs visionBackend=GPU) */
-    val supportsImageInput: Boolean get() = appMode is AppMode.Online || (selectedModel?.supportsImage == true)
-    /** Whether current mode supports audio input (online, or offline with audio-capable models) */
-    val supportsAudioInput: Boolean get() = appMode is AppMode.Online || (selectedModel?.supportsAudio == true)
+    /** Image input: online always, offline with Gemma 4 vision models (needs visionBackend=GPU + the engine's vision encoder actually loaded) */
+    val supportsImageInput: Boolean get() = appMode is AppMode.Online || (selectedModel?.supportsImage == true && offlineVisionAvailable)
+    /** Whether current mode supports audio input (online, or offline with audio-capable models whose audio encoder loaded) */
+    val supportsAudioInput: Boolean get() = appMode is AppMode.Online || (selectedModel?.supportsAudio == true && offlineAudioAvailable)
 }

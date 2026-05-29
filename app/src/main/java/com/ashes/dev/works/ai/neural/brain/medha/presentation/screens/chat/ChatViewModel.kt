@@ -620,7 +620,13 @@ class ChatViewModel(
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                _uiState.update { it.copy(modelStatus = ModelStatus.Initializing) }
+                _uiState.update {
+                    it.copy(
+                        modelStatus = ModelStatus.Initializing,
+                        offlineVisionAvailable = true,
+                        offlineAudioAvailable = true
+                    )
+                }
 
                 if (_uiState.value.selectedModel == null) {
                     scanAvailableModels()
@@ -648,17 +654,37 @@ class ChatViewModel(
                 val hasVision = catalogModel?.supportsImage == true
                 val hasAudio = catalogModel?.supportsAudio == true
 
-                val engineConfig = EngineConfig(
-                    modelPath = modelFile.absolutePath,
-                    backend = Backend.CPU(),
-                    visionBackend = if (hasVision) Backend.GPU() else null,
-                    audioBackend = if (hasAudio) Backend.CPU() else null,
-                    maxNumTokens = modelMaxTokens
-                )
-
                 _uiState.update { it.copy(modelStatus = ModelStatus.Loading(0.3f, "Loading weights...")) }
-                engine = Engine(engineConfig)
-                engine!!.initialize()
+
+                // Build the engine. Some model bundles ship a multimodal (vision/audio)
+                // encoder that a given runtime/device can't load — e.g. LiteRT-LM rejecting
+                // a multi-signature vision encoder ("Vision Encoder model must have exactly
+                // one signature but got 3"). Instead of failing the whole engine, fall back
+                // to text-only so the model still works.
+                var visionEnabled = hasVision
+                var audioEnabled = hasAudio
+
+                fun buildEngine(vision: Boolean, audio: Boolean) = Engine(
+                    EngineConfig(
+                        modelPath = modelFile.absolutePath,
+                        backend = Backend.CPU(),
+                        visionBackend = if (vision) Backend.GPU() else null,
+                        audioBackend = if (audio) Backend.CPU() else null,
+                        maxNumTokens = modelMaxTokens
+                    )
+                ).also { it.initialize() }
+
+                engine = try {
+                    buildEngine(visionEnabled, audioEnabled)
+                } catch (e: Exception) {
+                    if ((visionEnabled || audioEnabled) && isMultimodalLoadError(e)) {
+                        addLog(LogLevel.WARNING, TAG,
+                            "Multimodal load failed (${e.message}); retrying text-only")
+                        visionEnabled = false
+                        audioEnabled = false
+                        buildEngine(false, false)
+                    } else throw e
+                }
 
                 _uiState.update { it.copy(modelStatus = ModelStatus.Loading(0.8f, "Creating conversation...")) }
                 val samplerConfig = SamplerConfig(topK = topK, topP = topP, temperature = temperature)
@@ -668,10 +694,16 @@ class ChatViewModel(
 
                 val features = buildList {
                     add("CPU")
-                    if (hasVision) add("Vision(GPU)")
-                    if (hasAudio) add("Audio")
+                    if (visionEnabled) add("Vision(GPU)")
+                    if (audioEnabled) add("Audio")
                 }.joinToString(", ")
-                _uiState.update { it.copy(modelStatus = ModelStatus.Ready) }
+                _uiState.update {
+                    it.copy(
+                        modelStatus = ModelStatus.Ready,
+                        offlineVisionAvailable = visionEnabled,
+                        offlineAudioAvailable = audioEnabled
+                    )
+                }
                 addLog(LogLevel.INFO, TAG, "Engine ready: ${modelToLoad.displayName} (LiteRT LM, $features, ${modelMaxTokens} tokens)")
 
                 // Start foreground service to keep model alive in background
@@ -683,6 +715,20 @@ class ChatViewModel(
                 destroyEngine()
             }
         }
+    }
+
+    /**
+     * Heuristic: does this engine-init failure look like a vision/audio encoder
+     * load problem (vs. a genuine model-wide failure)? If so we can safely retry
+     * text-only. Matches the LiteRT-LM multi-signature vision encoder rejection
+     * and related multimodal executor failures.
+     */
+    private fun isMultimodalLoadError(e: Throwable): Boolean {
+        val msg = (e.message ?: "").lowercase()
+        return "vision" in msg ||
+            "signature" in msg ||
+            "audio" in msg ||
+            "encoder" in msg
     }
 
     private fun destroyEngine() {
