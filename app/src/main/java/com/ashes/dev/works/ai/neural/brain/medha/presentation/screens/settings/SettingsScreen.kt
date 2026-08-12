@@ -58,13 +58,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
@@ -76,6 +83,7 @@ import com.ashes.dev.works.ai.neural.brain.medha.data.remote.GeminiModelInfo
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.ApiKeyEntry
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.AppMode
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.ModelInfo
+import com.ashes.dev.works.ai.neural.brain.medha.domain.model.ModelStatus
 import com.ashes.dev.works.ai.neural.brain.medha.presentation.screens.chat.ChatViewModel
 import com.ashes.dev.works.ai.neural.brain.medha.ui.theme.AccentCyan
 import com.ashes.dev.works.ai.neural.brain.medha.ui.theme.AccentGold
@@ -103,6 +111,21 @@ fun SettingsScreen(
     var showDeleteModel by remember { mutableStateOf<com.ashes.dev.works.ai.neural.brain.medha.domain.model.ModelInfo?>(null) }
 
     val context = LocalContext.current
+
+    // All-files access is granted on a system Settings screen, so there is no result to await —
+    // re-check whenever this screen comes back to the foreground.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshStorageState()
+                viewModel.scanAvailableModels()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     // SAF file picker for importing offline models — no permission needed
     val modelPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -114,6 +137,21 @@ fun SettingsScreen(
             if (nameIndex >= 0) cursor.getString(nameIndex) else null
         } ?: uri.lastPathSegment?.substringAfterLast('/') ?: "model.litertlm"
         viewModel.importModelFromUri(uri, fileName)
+    }
+
+    // System folder picker for the shared model folder. OpenDocumentTree needs no permission —
+    // the user grants exactly one folder and MEDHA persists that grant across reboots.
+    val modelFolderPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri: Uri? ->
+        if (treeUri != null) viewModel.setSharedModelFolder(treeUri)
+    }
+
+    // Same idea for one file at a time — used in place, unlike "Import" which copies.
+    val singleModelPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) viewModel.addSharedModelFile(uri)
     }
 
     Scaffold(
@@ -642,6 +680,17 @@ fun SettingsScreen(
 
             // Offline Model Selection
             if (uiState.appMode is AppMode.Offline) {
+                SectionHeader("Shared model folder")
+                Spacer(modifier = Modifier.height(8.dp))
+                SharedModelFolderCard(
+                    folderName = uiState.sharedFolderPath,
+                    suggestedPath = uiState.suggestedFolderPath,
+                    onPick = { runCatching { modelFolderPicker.launch(null) } },
+                    onPickFile = { runCatching { singleModelPicker.launch(arrayOf("*/*")) } },
+                    onClear = { viewModel.clearSharedModelFolder() }
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
                 SectionHeader("Offline Models")
                 Spacer(modifier = Modifier.height(8.dp))
 
@@ -656,8 +705,17 @@ fun SettingsScreen(
                                 ModelOption(
                                     model = model,
                                     isSelected = uiState.selectedModel?.filePath == model.filePath,
-                                    onClick = { viewModel.selectModel(model) },
-                                    onDelete = { showDeleteModel = model }
+                                    copyProgress = uiState.modelCopyProgress[model.fileName],
+                                    // A shared model cannot be loaded in place — the native
+                                    // loader can't open a SAF document — so tapping it starts
+                                    // the copy instead of a doomed load.
+                                    onClick = {
+                                        if (model.isShared) viewModel.copySharedModelIn(model)
+                                        else viewModel.selectModel(model)
+                                    },
+                                    // No delete for shared-folder models: the file belongs to the
+                                    // user and their other apps may be using it.
+                                    onDelete = if (model.isShared) null else ({ showDeleteModel = model })
                                 )
                                 if (index < uiState.availableModels.size - 1) {
                                     HorizontalDivider(
@@ -668,6 +726,16 @@ fun SettingsScreen(
                             }
                         }
                     }
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Explicit load/unload. A resident Gemma 4 holds ~2.5GB; being able to
+                    // release it without killing the app matters on a full device.
+                    ModelLoadControl(
+                        status = uiState.modelStatus,
+                        modelName = uiState.selectedModel?.displayName,
+                        onLoad = { viewModel.loadModel() },
+                        onUnload = { viewModel.unloadModel() }
+                    )
                     Spacer(modifier = Modifier.height(8.dp))
                 }
 
@@ -874,7 +942,9 @@ private fun ApiKeyItem(
                     IconButton(
                         onClick = onMoveUp,
                         enabled = index > 0,
-                        modifier = Modifier.size(24.dp)
+                        // 40dp keeps the two stacked arrows from dominating the key row while
+                        // still giving a comfortably tappable target for the reorder controls.
+                        modifier = Modifier.size(40.dp)
                     ) {
                         Icon(
                             Icons.Default.KeyboardArrowUp,
@@ -893,7 +963,7 @@ private fun ApiKeyItem(
                     IconButton(
                         onClick = onMoveDown,
                         enabled = index < totalKeys - 1,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(40.dp)
                     ) {
                         Icon(
                             Icons.Default.KeyboardArrowDown,
@@ -1040,7 +1110,7 @@ private fun ApiKeyItem(
             Spacer(modifier = Modifier.width(4.dp))
 
             // Delete button
-            IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+            IconButton(onClick = onDelete, modifier = Modifier.size(48.dp)) {
                 Icon(
                     Icons.Default.Delete,
                     contentDescription = "Remove key",
@@ -1267,6 +1337,96 @@ private fun ApiKeyItem(
     }
 }
 
+/**
+ * Load / unload the selected model, showing what the engine is actually doing.
+ *
+ * The button is the single control for engine residency: it reads "Unload" only while the model
+ * is genuinely in memory, and "Retry" after a failure, so it never invites a tap that does
+ * nothing.
+ */
+@Composable
+private fun ModelLoadControl(
+    status: ModelStatus,
+    modelName: String?,
+    onLoad: () -> Unit,
+    onUnload: () -> Unit
+) {
+    val loaded = status is ModelStatus.Ready
+    val busy = status is ModelStatus.Loading || status is ModelStatus.Initializing
+
+    val (label, tint) = when {
+        busy -> "Loading…" to AccentGold
+        loaded -> "Unload model" to StatusWarning
+        status is ModelStatus.Error -> "Retry load" to StatusError
+        else -> "Load model" to AccentGreen
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .background(
+                            when {
+                                loaded -> StatusSuccess
+                                busy -> AccentGold
+                                status is ModelStatus.Error -> StatusError
+                                else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+                            },
+                            CircleShape
+                        )
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        when {
+                            loaded -> "Model loaded"
+                            busy -> "Loading model…"
+                            status is ModelStatus.Error -> "Model failed to load"
+                            else -> "Model not loaded"
+                        },
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        when {
+                            loaded -> "${modelName ?: "Model"} is in memory and ready to chat."
+                            busy -> "Mapping weights — this takes a few seconds."
+                            status is ModelStatus.Error -> (status as ModelStatus.Error).message
+                            else -> "Frees roughly the model's size in RAM while unloaded."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Surface(
+                onClick = { if (!busy) { if (loaded) onUnload() else onLoad() } },
+                enabled = !busy,
+                shape = RoundedCornerShape(10.dp),
+                color = tint.copy(alpha = if (busy) 0.08f else 0.15f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    label,
+                    modifier = Modifier.padding(vertical = 12.dp),
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = tint.copy(alpha = if (busy) 0.6f else 1f)
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun SectionHeader(title: String) {
     Text(
@@ -1275,6 +1435,121 @@ private fun SectionHeader(title: String) {
         fontWeight = FontWeight.Bold,
         color = MaterialTheme.colorScheme.primary
     )
+}
+
+/**
+ * Points MEDHA at a folder of models the user owns, so a 2.4 GB `.litertlm` downloaded by another
+ * app is used in place instead of downloaded a second time.
+ *
+ * Deliberately a folder PICKER rather than a permission toggle: `ACTION_OPEN_DOCUMENT_TREE` grants
+ * exactly one folder and needs no manifest permission, where all-files access would be a
+ * Play-restricted permission for the same result.
+ */
+@Composable
+private fun SharedModelFolderCard(
+    folderName: String,
+    suggestedPath: String,
+    onPick: () -> Unit,
+    onPickFile: () -> Unit,
+    onClear: () -> Unit
+) {
+    val picked = folderName.isNotBlank()
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.Folder,
+                    contentDescription = null,
+                    tint = if (picked) AccentCyan else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        if (picked) folderName else "No folder selected",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (picked) AccentCyan else MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        if (picked) {
+                            "Models here and in its subfolders are listed below and loaded in " +
+                                "place — no second copy. New downloads are saved here too."
+                        } else {
+                            "Pick a folder — e.g. $suggestedPath — to use models your other apps " +
+                                "already downloaded, or that you copied over from a PC."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Row {
+                Surface(
+                    onClick = onPick,
+                    shape = RoundedCornerShape(10.dp),
+                    color = AccentCyan.copy(alpha = 0.15f),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        if (picked) "Change folder" else "Choose folder",
+                        modifier = Modifier.padding(vertical = 12.dp),
+                        textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = AccentCyan
+                    )
+                }
+                if (picked) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Surface(
+                        onClick = onClear,
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            "Remove",
+                            modifier = Modifier.padding(vertical = 12.dp),
+                            textAlign = TextAlign.Center,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            Surface(
+                onClick = onPickFile,
+                shape = RoundedCornerShape(10.dp),
+                color = Color.Transparent,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    "Or add a single model file",
+                    modifier = Modifier.padding(vertical = 12.dp),
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+            }
+            Text(
+                "Loaded from where it already is — unlike Import below, which makes a second copy.",
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+            )
+        }
+    }
 }
 
 @Composable
@@ -1522,7 +1797,8 @@ private fun ModelOption(
     model: ModelInfo,
     isSelected: Boolean,
     onClick: () -> Unit,
-    onDelete: (() -> Unit)? = null
+    onDelete: (() -> Unit)? = null,
+    copyProgress: Float? = null
 ) {
     val borderMod = if (isSelected) {
         Modifier.border(1.dp, AccentGold.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
@@ -1541,14 +1817,49 @@ private fun ModelOption(
         )
         Spacer(modifier = Modifier.width(8.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(model.displayName, style = MaterialTheme.typography.titleSmall, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium, color = if (isSelected) AccentGold else MaterialTheme.colorScheme.onSurface)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(model.displayName, style = MaterialTheme.typography.titleSmall, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium, color = if (isSelected) AccentGold else MaterialTheme.colorScheme.onSurface)
+                // Tells the user this file is the shared copy, so deleting it affects other apps.
+                if (model.isShared) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(shape = RoundedCornerShape(4.dp), color = AccentCyan.copy(alpha = 0.15f)) {
+                        Text(
+                            "SHARED",
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                            color = AccentCyan
+                        )
+                    }
+                }
+            }
             Text("${model.fileName}  \u2022  ${model.sizeInMb} MB", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+            // A shared model has to be copied in before the engine can open it; say so on the
+            // row rather than letting the user tap it and get an error.
+            if (copyProgress != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                androidx.compose.material3.LinearProgressIndicator(
+                    progress = { copyProgress },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = AccentCyan
+                )
+                Text(
+                    "Copying into MEDHA\u2026 ${(copyProgress * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AccentCyan
+                )
+            } else if (model.isShared) {
+                Text(
+                    "Tap to copy into MEDHA (${model.sizeInMb} MB) \u2014 needed before it can run",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AccentCyan.copy(alpha = 0.8f)
+                )
+            }
         }
         if (isSelected) {
             Icon(Icons.Default.Check, contentDescription = "Selected", tint = AccentGold, modifier = Modifier.size(20.dp))
         }
         onDelete?.let {
-            IconButton(onClick = it, modifier = Modifier.size(32.dp)) {
+            IconButton(onClick = it, modifier = Modifier.size(48.dp)) {
                 Icon(Icons.Default.Delete, "Delete", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
             }
         }

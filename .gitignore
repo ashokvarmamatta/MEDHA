@@ -16,3 +16,8 @@ local.properties
 
 # Agent scratch / planning files
 .agent/
+
+# Local device-test screenshots
+/medha_test.png
+/medha_after_install.png
+/test screenshot/

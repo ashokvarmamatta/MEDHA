@@ -21,12 +21,31 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // Role 11/22 gate: a release build must be shrunk, obfuscated and non-debuggable.
+            // Keep rules for the reflective consumers (Moshi, Retrofit, Room, LiteRT-LM JNI)
+            // live in proguard-rules.pro.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            isDebuggable = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
         }
+        debug {
+            // NOTE: deliberately NO applicationIdSuffix. The GitHub release workflow ships the
+            // DEBUG apk to users, so changing its applicationId would orphan every existing
+            // install. Revisit once release signing exists in CI (see AUDIT_ROLES.md).
+            isMinifyEnabled = false
+        }
+    }
+    lint {
+        // Never let a release be assembled over a fatal lint issue.
+        abortOnError = true
+        checkReleaseBuilds = true
+        warningsAsErrors = false
+        htmlReport = true
+        textReport = true
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
@@ -38,6 +57,13 @@ android {
     buildFeatures {
         compose = true
     }
+}
+
+// Role 13: Room must export its schema so a real migration can be written against a known
+// previous version. Without this there is no schema history and every version bump is stuck
+// on fallbackToDestructiveMigration (which wipes the user's chat history).
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {
@@ -61,12 +87,9 @@ dependencies {
     implementation(libs.converter.moshi)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.core)
-    implementation(libs.accompanist.permissions)
-    implementation(libs.play.services.location)
-    implementation(libs.androidx.camera.camera2)
-    implementation(libs.androidx.camera.lifecycle)
-    implementation(libs.androidx.camera.view)
-    implementation(libs.androidx.camera.core)
+    // Removed (role 11 — unused dependencies): accompanist-permissions,
+    // play-services-location and the four CameraX artifacts had zero imports anywhere in
+    // app/src. They only added download size and third-party manifest entries.
     implementation(libs.logging.interceptor)
     implementation(libs.okhttp)
     implementation(libs.moshi.kotlin)

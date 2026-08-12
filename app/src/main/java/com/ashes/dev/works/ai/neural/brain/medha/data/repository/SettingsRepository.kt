@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.ashes.dev.works.ai.neural.brain.medha.data.local.KeystoreCrypto
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.ApiKeyEntry
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.CustomGrandMaster
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.Message
@@ -99,7 +100,9 @@ class SettingsRepository(private val context: Context) {
         for (entry in keys) {
             arr.put(JSONObject().apply {
                 put("id", entry.id)
-                put("key", entry.key)
+                // Keystore-encrypted at rest — see KeystoreCrypto. The in-memory
+                // ApiKeyEntry still carries the plaintext key the API calls need.
+                put("key", KeystoreCrypto.encrypt(entry.key))
                 put("label", entry.label)
                 put("baseUrl", entry.baseUrl)
                 put("isValidated", entry.isValidated)
@@ -140,7 +143,9 @@ class SettingsRepository(private val context: Context) {
                 }
                 ApiKeyEntry(
                     id = obj.getString("id"),
-                    key = obj.getString("key"),
+                    // Transparently reads both the encrypted form and any plaintext key
+                    // written by an older build (which is re-encrypted on the next save).
+                    key = KeystoreCrypto.decrypt(obj.getString("key")),
                     label = obj.optString("label", ""),
                     baseUrl = obj.optString("baseUrl", ""),
                     isValidated = obj.optBoolean("isValidated", false),

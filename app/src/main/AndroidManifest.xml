@@ -8,21 +8,37 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!--
+      Shared model folder: NO storage permission is declared on purpose.
+
+      MEDHA reads models out of a folder the user picks with ACTION_OPEN_DOCUMENT_TREE (typically
+      /sdcard/AIModels, the same folder Koeyomi downloads into), so one 2.4 GB .litertlm serves
+      every app instead of one private copy each.
+
+      Koeyomi uses MANAGE_EXTERNAL_STORAGE for this because LiteRT-LM's EngineConfig(modelPath)
+      goes to native code that open()s and mmap()s the path, and a content:// URI cannot be
+      passed there. That is true — but SAF also yields an open file descriptor, and
+      /proc/self/fd/N IS a path native code can open. See ExternalModelStore.openForEngine.
+      All-files access is a Play-restricted permission routinely refused for anything that is
+      not a file manager, and MEDHA ships through Play, so the fd route is the right trade.
+    -->
+
     <application
         android:name=".MedhaApplication"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
+        android:enableOnBackInvokedCallback="true"
+        android:usesCleartextTraffic="false"
         android:theme="@style/Theme.MEDHA"
 >
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:label="@string/app_name"
             android:theme="@style/Theme.MEDHA">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -35,7 +51,15 @@
             android:name=".service.MedhaService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="specialUse" />
+            android:foregroundServiceType="specialUse">
+            <!-- Play requires every specialUse foreground service to declare its subtype;
+                 without this the release is rejected at review. -->
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="on_device_llm_inference: keeps the locally loaded language model
+                    resident and the CPU awake while the user's prompt is being generated or a
+                    model file is downloading. No cloud component is involved." />
+        </service>
     </application>
 
 </manifest>

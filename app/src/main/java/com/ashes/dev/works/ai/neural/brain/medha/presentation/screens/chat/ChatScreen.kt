@@ -15,6 +15,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -30,6 +31,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
@@ -40,6 +42,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -50,11 +53,21 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.text.AnnotatedString
+import android.widget.Toast
+import com.ashes.dev.works.ai.neural.brain.medha.presentation.components.MarkdownText
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
@@ -87,6 +100,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.SmallFloatingActionButton
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -99,6 +116,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -145,7 +163,21 @@ fun ChatScreen(
     var prompt by remember { mutableStateOf("") }
     var showHistory by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
+    var showContextSheet by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+
+    // Back press handling: don't exit straight from an active chat. The first press
+    // exits a Grand Master session or clears the conversation back to the empty home
+    // state; only a second press (already on the empty home screen) exits the app.
+    val inActiveSession = uiState.activeGrandMaster != null ||
+        uiState.activeCustomGrandMaster != null ||
+        uiState.messages.isNotEmpty()
+    BackHandler(enabled = inActiveSession) {
+        when {
+            uiState.activeGrandMaster != null || uiState.activeCustomGrandMaster != null -> viewModel.exitGrandMaster()
+            else -> viewModel.startNewChat()
+        }
+    }
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -159,9 +191,24 @@ fun ChatScreen(
         uri?.let { viewModel.setPendingAudio(it.toString()) }
     }
 
-    LaunchedEffect(uiState.messages.size) {
-        if (uiState.messages.isNotEmpty()) {
-            listState.animateScrollToItem(uiState.messages.size - 1)
+    val scope = rememberCoroutineScope()
+    val screenContext = LocalContext.current
+
+    // Auto-scroll to follow new messages AND streaming tokens — but only when the user is
+    // already near the bottom, so scrolling up to read history isn't interrupted.
+    LaunchedEffect(uiState.messages.size, uiState.streamingText.length, uiState.streamingThinking.length, uiState.isGenerating) {
+        val total = uiState.messages.size + if (uiState.isGenerating) 1 else 0
+        if (total == 0) return@LaunchedEffect
+        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+        val nearBottom = lastVisible < 0 || lastVisible >= total - 2
+        if (nearBottom) listState.scrollToItem(total - 1)
+    }
+
+    // Surface download errors (storage full, incomplete, etc.) as a toast.
+    LaunchedEffect(uiState.downloadError) {
+        uiState.downloadError?.let { msg ->
+            Toast.makeText(screenContext, msg, Toast.LENGTH_LONG).show()
+            viewModel.clearDownloadError()
         }
     }
 
@@ -247,6 +294,8 @@ fun ChatScreen(
             currentMaxTokens = viewModel.maxTokens,
             currentEnableThinking = viewModel.enableThinking,
             currentLanguage = viewModel.outputLanguage,
+            currentPreferGpu = uiState.preferGpu,
+            deviceContextCap = uiState.deviceContextCap,
             selectedModel = uiState.selectedModel,
             onDismiss = { viewModel.hideConfigDialog() },
             onApply = { topK, topP, temp, maxTok, gpu, thinking, language ->
@@ -269,6 +318,11 @@ fun ChatScreen(
         )
     }
 
+    // Context window breakdown sheet
+    if (showContextSheet) {
+        ContextWindowSheet(uiState = uiState, onDismiss = { showContextSheet = false })
+    }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
@@ -286,7 +340,7 @@ fun ChatScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             StatusDot(modelStatus = uiState.modelStatus)
                             Spacer(modifier = Modifier.width(12.dp))
-                            Column {
+                            Column(modifier = Modifier.clickable { showContextSheet = true }) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     val gmActive = uiState.activeGrandMaster != null || uiState.activeCustomGrandMaster != null
                                     val gmDisplayTitle = uiState.activeGrandMaster?.let { "${it.icon} ${it.title}" }
@@ -308,6 +362,35 @@ fun ChatScreen(
                                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
                                             color = if (uiState.appMode is AppMode.Online) AccentCyan else AccentGreen
                                         )
+                                    }
+                                    // Context-usage % — tap (whole title) opens the full breakdown
+                                    val ctxReady = uiState.appMode is AppMode.Online ||
+                                        (uiState.modelStatus is ModelStatus.Ready && uiState.offlineContextLength > 0)
+                                    if (ctxReady) {
+                                        // Recompute only when the conversation actually changes.
+                                        // Without the remember this walks + tokenises every
+                                        // message on each streamed token, since streamingText
+                                        // recomposes the whole top bar.
+                                        val ctxPct = remember(
+                                            uiState.messages,
+                                            uiState.offlineContextLength,
+                                            uiState.appMode,
+                                            uiState.activeGrandMaster,
+                                            uiState.activeCustomGrandMaster
+                                        ) { computeContextUsage(uiState).percent }
+                                        val pctColor = if (ctxPct >= 85) StatusError else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = pctColor.copy(alpha = 0.12f)
+                                        ) {
+                                            Text(
+                                                "$ctxPct%",
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                                                color = pctColor
+                                            )
+                                        }
                                     }
                                 }
                                 Text(
@@ -346,6 +429,10 @@ fun ChatScreen(
                                 DropdownMenuItem(
                                     text = { Text("\uD83D\uDCCB  Chat History") },
                                     onClick = { showOverflowMenu = false; showHistory = true }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("\uD83D\uDCCA  Context window") },
+                                    onClick = { showOverflowMenu = false; showContextSheet = true }
                                 )
                                 if (uiState.appMode is AppMode.Offline) {
                                     DropdownMenuItem(
@@ -387,6 +474,7 @@ fun ChatScreen(
                     viewModel.sendMessage(prompt)
                     prompt = ""
                 },
+                onStop = { viewModel.stopGeneration() },
                 onShowTemplates = { viewModel.togglePromptTemplates() },
                 isEnabled = uiState.modelStatus is ModelStatus.Ready && !uiState.isGenerating,
                 isGenerating = uiState.isGenerating,
@@ -410,12 +498,17 @@ fun ChatScreen(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    items(uiState.messages, key = { it.id }) { message ->
+                    itemsIndexed(uiState.messages, key = { _, m -> m.id }) { index, message ->
                         AnimatedVisibility(
                             visible = true,
                             enter = fadeIn(tween(300)) + slideInVertically(initialOffsetY = { it / 2 }, animationSpec = tween(300))
                         ) {
-                            MessageBubble(message = message, viewModel = viewModel, aiName = uiState.activeGrandMaster?.title ?: uiState.activeCustomGrandMaster?.title ?: "Medha")
+                            MessageBubble(
+                                message = message,
+                                viewModel = viewModel,
+                                aiName = uiState.activeGrandMaster?.title ?: uiState.activeCustomGrandMaster?.title ?: "Medha",
+                                isLast = index == uiState.messages.lastIndex && !uiState.isGenerating
+                            )
                         }
                     }
                     if (uiState.isGenerating) {
@@ -425,6 +518,28 @@ fun ChatScreen(
                         } else {
                             item { TypingIndicator() }
                         }
+                    }
+                }
+
+                // Scroll-to-bottom button when the user has scrolled up
+                val showScrollDown by remember {
+                    derivedStateOf {
+                        val info = listState.layoutInfo
+                        val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+                        info.totalItemsCount > 0 && last < info.totalItemsCount - 2
+                    }
+                }
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = showScrollDown,
+                    enter = fadeIn(), exit = fadeOut(),
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp)
+                ) {
+                    SmallFloatingActionButton(
+                        onClick = { scope.launch { listState.animateScrollToItem((listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)) } },
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    ) {
+                        Icon(Icons.Default.KeyboardArrowDown, "Scroll to bottom")
                     }
                 }
             }
@@ -882,12 +997,12 @@ private fun GrandMasterCard(
             }
             if (isCustom) {
                 if (onExport != null) {
-                    IconButton(onClick = onExport, modifier = Modifier.size(32.dp)) {
+                    IconButton(onClick = onExport, modifier = Modifier.size(48.dp)) {
                         Icon(Icons.Default.Share, "Export", modifier = Modifier.size(18.dp), tint = AccentCyan.copy(alpha = 0.7f))
                     }
                 }
                 if (onDelete != null && !isActive) {
-                    IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                    IconButton(onClick = onDelete, modifier = Modifier.size(48.dp)) {
                         Icon(Icons.Default.Delete, "Delete", modifier = Modifier.size(18.dp), tint = StatusError.copy(alpha = 0.6f))
                     }
                 }
@@ -1316,7 +1431,7 @@ private fun SetupStep(number: String, text: String) {
 }
 
 @Composable
-private fun MessageBubble(message: Message, viewModel: ChatViewModel, aiName: String = "Medha") {
+private fun MessageBubble(message: Message, viewModel: ChatViewModel, aiName: String = "Medha", isLast: Boolean = false) {
     val isUser = message.user == User.Person
     val bubbleShape = if (isUser) RoundedCornerShape(20.dp, 20.dp, 4.dp, 20.dp) else RoundedCornerShape(20.dp, 20.dp, 20.dp, 4.dp)
     val containerColor = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
@@ -1350,9 +1465,20 @@ private fun MessageBubble(message: Message, viewModel: ChatViewModel, aiName: St
                     Spacer(modifier = Modifier.height(8.dp))
                 }
 
-                // Text content
+                // Text content — assistant replies render as markdown (code blocks, lists,
+                // bold, etc.); the user's own text is plain but selectable.
                 if (message.text.isNotBlank()) {
-                    Text(message.text, style = MaterialTheme.typography.bodyLarge, color = textColor)
+                    if (isUser) {
+                        SelectionContainer {
+                            Text(message.text, style = MaterialTheme.typography.bodyLarge, color = textColor)
+                        }
+                    } else {
+                        MarkdownText(
+                            markdown = message.text,
+                            color = textColor,
+                            baseStyle = MaterialTheme.typography.bodyLarge
+                        )
+                    }
                 }
 
                 // AI generated images
@@ -1433,6 +1559,36 @@ private fun MessageBubble(message: Message, viewModel: ChatViewModel, aiName: St
                                     color = textColor.copy(alpha = 0.6f),
                                     modifier = Modifier.fillMaxWidth()
                                 )
+                            }
+                        }
+                    }
+                }
+
+                // Per-message actions — assistant messages get Copy (+ Regenerate on the last one)
+                if (!isUser && message.text.isNotBlank()) {
+                    val haptics = LocalHapticFeedback.current
+                    val clipboard = LocalClipboardManager.current
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                clipboard.setText(AnnotatedString(message.text))
+                                Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.size(48.dp)
+                        ) {
+                            Icon(Icons.Default.ContentCopy, "Copy message", modifier = Modifier.size(16.dp), tint = textColor.copy(alpha = 0.6f))
+                        }
+                        if (isLast) {
+                            IconButton(
+                                onClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    viewModel.regenerateLastResponse()
+                                },
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(Icons.Default.Refresh, "Regenerate", modifier = Modifier.size(16.dp), tint = textColor.copy(alpha = 0.6f))
                             }
                         }
                     }
@@ -1547,6 +1703,8 @@ private fun ModelConfigDialog(
     currentMaxTokens: Int,
     currentEnableThinking: Boolean,
     currentLanguage: String,
+    currentPreferGpu: Boolean,
+    deviceContextCap: Int,
     selectedModel: ModelInfo?,
     onDismiss: () -> Unit,
     onApply: (topK: Int, topP: Double, temperature: Double, maxTokens: Int, useGpu: Boolean, thinking: Boolean, language: String) -> Unit
@@ -1559,7 +1717,9 @@ private fun ModelConfigDialog(
     var topK by remember { mutableStateOf(currentTopK.toFloat()) }
     var topP by remember { mutableStateOf(currentTopP.toFloat()) }
     var temperature by remember { mutableStateOf(currentTemperature.toFloat()) }
-    var useGpu by remember { mutableStateOf(false) }
+    // Reflects the real, persisted setting. It used to be hardcoded false, so the dialog always
+    // opened on "CPU" no matter what — and the value went nowhere when applied.
+    var useGpu by remember { mutableStateOf(currentPreferGpu && supportsGpu) }
     var enableThinking by remember { mutableStateOf(currentEnableThinking) }
     var outputLanguage by remember { mutableStateOf(currentLanguage) }
     var showLanguageMenu by remember { mutableStateOf(false) }
@@ -1584,6 +1744,17 @@ private fun ModelConfigDialog(
                         modifier = Modifier.weight(1f)
                     )
                     Text("${maxTokens.toInt()}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(40.dp))
+                }
+                // The device budget is a hard ceiling, not a suggestion — asking for more than
+                // the KV cache fits in RAM is what got the app killed. Say so here rather than
+                // accepting a number and quietly loading a smaller one.
+                if (deviceContextCap in 1 until maxTokens.toInt()) {
+                    Text(
+                        "This device can allocate $deviceContextCap tokens right now, so that is " +
+                            "what will load. Close some apps and reload to raise it.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = StatusWarning
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -1808,7 +1979,7 @@ private fun ChatHistorySheet(
                                         }
                                     }
                                 }
-                                IconButton(onClick = { onDeleteSession(session.id) }, modifier = Modifier.size(32.dp)) {
+                                IconButton(onClick = { onDeleteSession(session.id) }, modifier = Modifier.size(48.dp)) {
                                     Icon(Icons.Default.Delete, "Delete", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
                                 }
                             }
@@ -1866,7 +2037,7 @@ private fun StreamingBubble(streamingText: String, thinkingText: String, isThink
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
                 if (streamingText.isNotEmpty()) {
-                    Text(streamingText, style = MaterialTheme.typography.bodyLarge, color = textColor)
+                    MarkdownText(markdown = streamingText, color = textColor, baseStyle = MaterialTheme.typography.bodyLarge)
                 } else {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(modifier = Modifier.size(14.dp), color = AccentCyan, strokeWidth = 1.5.dp)
@@ -1883,6 +2054,7 @@ private fun ChatInputBar(
     prompt: String,
     onPromptChange: (String) -> Unit,
     onSend: () -> Unit,
+    onStop: () -> Unit,
     onShowTemplates: () -> Unit,
     isEnabled: Boolean,
     isGenerating: Boolean,
@@ -1915,7 +2087,7 @@ private fun ChatInputBar(
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                             )
                         }
-                        IconButton(onClick = onRemoveImage, modifier = Modifier.size(32.dp)) {
+                        IconButton(onClick = onRemoveImage, modifier = Modifier.size(48.dp)) {
                             Icon(Icons.Default.Close, "Remove", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
                         }
                     }
@@ -1964,16 +2136,30 @@ private fun ChatInputBar(
                     maxLines = 4
                 )
                 Spacer(modifier = Modifier.width(6.dp))
-                IconButton(
-                    onClick = onSend,
-                    enabled = isEnabled && (prompt.isNotBlank() || pendingImageUri != null),
-                    colors = IconButtonDefaults.iconButtonColors(
-                        containerColor = if (isEnabled && (prompt.isNotBlank() || pendingImageUri != null)) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = if (isEnabled && (prompt.isNotBlank() || pendingImageUri != null)) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
-                    ),
-                    modifier = Modifier.size(48.dp).clip(CircleShape)
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.Send, "Send", modifier = Modifier.size(20.dp))
+                if (isGenerating) {
+                    // While a response is streaming, the action button stops it.
+                    IconButton(
+                        onClick = onStop,
+                        colors = IconButtonDefaults.iconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError
+                        ),
+                        modifier = Modifier.size(48.dp).clip(CircleShape)
+                    ) {
+                        Icon(Icons.Filled.Stop, "Stop", modifier = Modifier.size(22.dp))
+                    }
+                } else {
+                    IconButton(
+                        onClick = onSend,
+                        enabled = isEnabled && (prompt.isNotBlank() || pendingImageUri != null),
+                        colors = IconButtonDefaults.iconButtonColors(
+                            containerColor = if (isEnabled && (prompt.isNotBlank() || pendingImageUri != null)) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = if (isEnabled && (prompt.isNotBlank() || pendingImageUri != null)) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+                        ),
+                        modifier = Modifier.size(48.dp).clip(CircleShape)
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Send, "Send", modifier = Modifier.size(20.dp))
+                    }
                 }
             }
         }
@@ -1998,7 +2184,146 @@ private fun getSubtitleText(uiState: ChatState): String {
         is ModelStatus.PermissionRequired -> "Permission needed"
         is ModelStatus.Downloading -> "Downloading..."
     }
-    return "$modelName \u2022 $statusText"
+    // Context length is a real, finite limit only for offline models \u2014 show it there.
+    // Online (Gemini) context is effectively unlimited, so no meter is shown.
+    val ctxText = if (uiState.appMode is AppMode.Offline &&
+        uiState.modelStatus is ModelStatus.Ready &&
+        uiState.offlineContextLength > 0
+    ) {
+        " \u2022 ${formatContextLength(uiState.offlineContextLength)} ctx"
+    } else ""
+    // Show MTP (speculative decoding) badge when the offline engine has it active.
+    val mtpText = if (uiState.appMode is AppMode.Offline &&
+        uiState.modelStatus is ModelStatus.Ready &&
+        uiState.offlineMtpActive
+    ) " \u2022 MTP" else ""
+    return "$modelName \u2022 $statusText$ctxText$mtpText"
+}
+
+/** Format a token count as a short context label: 32768 -> "32K", 4096 -> "4K", 900 -> "900". */
+private fun formatContextLength(tokens: Int): String =
+    if (tokens >= 1024) "${tokens / 1024}K" else "$tokens"
+
+/** Rough token estimate when the model hasn't given an exact count (~4 chars per token). */
+private fun estimateTokens(text: String): Int =
+    if (text.isBlank()) 0 else (text.length / 4).coerceAtLeast(1)
+
+private class ContextUsage(val total: Int, val systemTokens: Int, val messageTokens: Int) {
+    val used: Int get() = (systemTokens + messageTokens).coerceAtMost(total)
+    val free: Int get() = (total - used).coerceAtLeast(0)
+    val percent: Int get() = if (total > 0) (used * 100 / total).coerceIn(0, 100) else 0
+}
+
+/** Estimate how much of the context window is in use. Offline uses the engine's real
+ *  window; online uses Gemini's ~1M window. Assistant replies use exact counts; user
+ *  text and the system prompt are estimated. */
+private fun computeContextUsage(uiState: ChatState): ContextUsage {
+    val isOnline = uiState.appMode is AppMode.Online
+    val total = (if (isOnline) 1_048_576 else uiState.offlineContextLength).coerceAtLeast(1)
+    val systemText = uiState.activeGrandMaster?.systemPrompt
+        ?: uiState.activeCustomGrandMaster?.systemPrompt ?: ""
+    val systemTokens = estimateTokens(systemText)
+    val messageTokens = uiState.messages.sumOf { m ->
+        val body = if (m.tokenCount > 0) m.tokenCount else estimateTokens(m.text)
+        body + estimateTokens(m.thinkingText ?: "")
+    }
+    return ContextUsage(total, systemTokens, messageTokens)
+}
+
+private fun fmtTokens(n: Int): String = when {
+    n >= 1_000_000 -> "%.1fM".format(n / 1_000_000.0)
+    n >= 1_000 -> "%.1fk".format(n / 1000.0)
+    else -> "$n"
+}
+
+/**
+ * Context-window usage breakdown, styled after the Claude desktop panel: a segmented
+ * bar plus a legend of System prompt / Messages / Free space with token counts and %.
+ * Offline uses the engine's real context window; online uses Gemini's ~1M window.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ContextWindowSheet(uiState: ChatState, onDismiss: () -> Unit) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val isOnline = uiState.appMode is AppMode.Online
+    val usage = computeContextUsage(uiState)
+    val total = usage.total
+    val systemTokens = usage.systemTokens
+    val messageTokens = usage.messageTokens
+    val used = usage.used
+    val free = usage.free
+    val pct = usage.percent.toFloat()
+
+    val msgColor = AccentCyan
+    val sysColor = MaterialTheme.colorScheme.primary
+    val freeColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Context window",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    "${fmtTokens(used)} / ${fmtTokens(total)} (${pct.toInt()}%)",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                if (isOnline) "Gemini • ${uiState.onlineModelName}" else (uiState.selectedModel?.displayName ?: "Offline model"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+            )
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Segmented usage bar
+            Row(modifier = Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp))) {
+                if (systemTokens > 0) Box(Modifier.weight(systemTokens.toFloat()).fillMaxHeight().background(sysColor))
+                if (messageTokens > 0) Box(Modifier.weight(messageTokens.toFloat()).fillMaxHeight().background(msgColor))
+                Box(Modifier.weight(free.toFloat().coerceAtLeast(0.001f)).fillMaxHeight().background(freeColor))
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+
+            ContextLegendRow(msgColor, "Messages", messageTokens, total)
+            if (systemTokens > 0) ContextLegendRow(sysColor, "System prompt", systemTokens, total)
+            ContextLegendRow(freeColor, "Free space", free, total)
+
+            Spacer(modifier = Modifier.height(14.dp))
+            Text(
+                "Token counts are estimated (~4 chars/token); assistant replies use the model's exact count." +
+                    if (isOnline) " Online sends the full history each turn." else "",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ContextLegendRow(color: Color, label: String, tokens: Int, total: Int) {
+    val pct = if (total > 0) tokens * 100f / total else 0f
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp)
+    ) {
+        Box(Modifier.size(12.dp).clip(RoundedCornerShape(3.dp)).background(color))
+        Spacer(modifier = Modifier.width(10.dp))
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f), modifier = Modifier.weight(1f))
+        Text(fmtTokens(tokens), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+        Spacer(modifier = Modifier.width(14.dp))
+        Text("${pct.toInt()}%", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f), modifier = Modifier.width(46.dp), textAlign = TextAlign.End)
+    }
 }
 
 @Composable

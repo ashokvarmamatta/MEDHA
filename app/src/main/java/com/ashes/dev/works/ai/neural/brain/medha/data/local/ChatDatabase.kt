@@ -83,7 +83,11 @@ interface ChatDao {
     suspend fun deleteMessages(sessionId: String)
 }
 
-@Database(entities = [ChatSessionEntity::class, ChatMessageEntity::class], version = 1, exportSchema = false)
+// exportSchema = true writes app/schemas/…/1.json, which is what a future Migration(1, 2)
+// is diffed against. Until such a migration exists, fallbackToDestructiveMigration below
+// still applies — it wipes chat history on a schema change, so version 2 must ship a real
+// migration and drop the fallback.
+@Database(entities = [ChatSessionEntity::class, ChatMessageEntity::class], version = 1, exportSchema = true)
 abstract class ChatDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
 

@@ -7,7 +7,6 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
@@ -24,14 +23,24 @@ class MedhaService : Service() {
         private const val CHANNEL_ID = "medha_service"
         private const val NOTIFICATION_ID = 1001
         private const val WAKE_LOCK_TAG = "Medha::OfflineModel"
+        // 10-minute safety cap — far more than a normal generation, but bounded so a
+        // missed "inference off" can never pin the CPU awake for an hour.
+        private const val WAKE_LOCK_TIMEOUT_MS = 10 * 60 * 1000L
+        private const val ACTION_INFERENCE_ON = "medha.INFERENCE_ON"
+        private const val ACTION_INFERENCE_OFF = "medha.INFERENCE_OFF"
 
-        fun start(context: Context) {
-            val intent = Intent(context, MedhaService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+        fun start(context: Context) = send(context, null)
+
+        /** Acquire the wake lock for the duration of an active offline generation. */
+        fun inferenceOn(context: Context) = send(context, ACTION_INFERENCE_ON)
+
+        /** Release the wake lock when generation finishes (keeps the model resident, CPU free). */
+        fun inferenceOff(context: Context) = send(context, ACTION_INFERENCE_OFF)
+
+        private fun send(context: Context, action: String?) {
+            val intent = Intent(context, MedhaService::class.java).apply { if (action != null) this.action = action }
+            // minSdk is 31, so startForegroundService is always the right call.
+            context.startForegroundService(intent)
         }
 
         fun stop(context: Context) {
@@ -48,8 +57,13 @@ class MedhaService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIFICATION_ID, buildNotification())
-        acquireWakeLock()
-        return START_STICKY
+        // The model staying resident does NOT need a wake lock — only the CPU work of an
+        // active generation does. Acquire only between inference-on / inference-off.
+        when (intent?.action) {
+            ACTION_INFERENCE_ON -> acquireWakeLock()
+            ACTION_INFERENCE_OFF -> releaseWakeLock()
+        }
+        return START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -62,10 +76,9 @@ class MedhaService : Service() {
     private fun acquireWakeLock() {
         if (wakeLock == null) {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG).apply {
-                acquire(60 * 60 * 1000L)
-            }
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG)
         }
+        wakeLock?.let { if (!it.isHeld) it.acquire(WAKE_LOCK_TIMEOUT_MS) }
     }
 
     private fun releaseWakeLock() {
@@ -76,18 +89,15 @@ class MedhaService : Service() {
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Medha AI Service",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Keeps the offline AI model running in the background"
-                setShowBadge(false)
-            }
-            val nm = getSystemService(NotificationManager::class.java)
-            nm.createNotificationChannel(channel)
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "Medha AI Service",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "Keeps the offline AI model running in the background"
+            setShowBadge(false)
         }
+        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
     private fun buildNotification(): Notification {

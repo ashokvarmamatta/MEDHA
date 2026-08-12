@@ -6,7 +6,6 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
-import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Base64
@@ -17,6 +16,12 @@ import com.ashes.dev.works.ai.neural.brain.medha.data.CatalogModel
 import com.ashes.dev.works.ai.neural.brain.medha.data.local.ChatDatabase
 import com.ashes.dev.works.ai.neural.brain.medha.data.local.ChatMessageEntity
 import com.ashes.dev.works.ai.neural.brain.medha.data.local.ChatSessionEntity
+import com.ashes.dev.works.ai.neural.brain.medha.data.local.EnginePrefs
+import com.ashes.dev.works.ai.neural.brain.medha.data.local.ExternalModelStore
+import com.ashes.dev.works.ai.neural.brain.medha.data.local.FileDownloadSink
+import com.ashes.dev.works.ai.neural.brain.medha.data.local.ModelDownloadSink
+import com.ashes.dev.works.ai.neural.brain.medha.data.local.ModelStorage
+import com.ashes.dev.works.ai.neural.brain.medha.data.local.SafDownloadSink
 import com.ashes.dev.works.ai.neural.brain.medha.data.ModelCatalog
 import com.ashes.dev.works.ai.neural.brain.medha.data.remote.GeminiApiService
 import com.ashes.dev.works.ai.neural.brain.medha.data.remote.GeminiContent
@@ -42,17 +47,22 @@ import com.ashes.dev.works.ai.neural.brain.medha.domain.model.PromptTemplate
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.User
 import com.ashes.dev.works.ai.neural.brain.medha.service.MedhaService
 import com.google.ai.edge.litertlm.Backend
+import com.google.ai.edge.litertlm.Capabilities
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.ExperimentalApi
+import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
@@ -86,6 +96,17 @@ class ChatViewModel(
         private const val GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/"
         private const val MODELS_DIR = "medha_models"
         private const val TMP_EXT = ".medhatmp"
+        // Cap how many prior messages the online (Gemini) path resends each turn.
+        private const val MAX_ONLINE_HISTORY_MESSAGES = 30
+        /** Room left for the rest of the app (UI, bitmaps, Room) on top of weights + KV cache. */
+        private const val SAFETY_MARGIN_MB = 512L
+        /**
+         * KV cache cost per token, in KB. Derived from a measured failure rather than a spec:
+         * a 32768-token window took RSS from 1.0 GB to 7.22 GB, ≈190 KB/token for Gemma 4 E2B.
+         * Rounded up for headroom. LiteRT-LM does not expose the real figure and it varies by
+         * architecture, so this is an estimate — deliberately pessimistic.
+         */
+        private const val KV_KB_PER_TOKEN = 200L
     }
 
     private val _uiState = MutableStateFlow(ChatState())
@@ -94,7 +115,18 @@ class ChatViewModel(
     // LiteRT LM engine state
     private var engine: Engine? = null
     private var conversation: Conversation? = null
+    /**
+     * Keeps the shared-folder file descriptor open while the engine holds its mmap. Closed only
+     * in [destroyEngine], AFTER the engine — closing it first would pull the mapping out from
+     * under native code.
+     */
+    private var modelHandle: ExternalModelStore.EngineHandle? = null
     private var geminiApi: GeminiApiService? = null
+    // In-flight generation coroutine, so the user can stop a long response.
+    private var generationJob: Job? = null
+
+    /** GPU preference + the native-GPU-crash guard. Read synchronously during engine init. */
+    private val enginePrefs = EnginePrefs(application)
 
     // Chat history
     private val chatDb = ChatDatabase.getInstance(application)
@@ -111,8 +143,22 @@ class ChatViewModel(
 
     init {
         addLog(LogLevel.INFO, TAG, "MEDHA AI Engine v$APP_VERSION starting (LiteRT LM)...")
+        // A GPU attempt still marked in-flight means last launch died inside the native GPU
+        // backend. Record it so this launch quietly uses CPU instead of crashing again.
+        enginePrefs.migrateUnsafeGpuPreference()
+        if (enginePrefs.consumeMigrationNotice()) {
+            addLog(LogLevel.WARNING, TAG,
+                "GPU turned off: it was enabled by a build that could not catch a GPU crash on " +
+                    "this device (SIGSEGV on RenderThread). Re-enable it in Configurations to retry.")
+        }
+        enginePrefs.reconcileGpuCrash()?.let { victim ->
+            addLog(LogLevel.WARNING, TAG, "Previous GPU load of $victim crashed — falling back to CPU")
+        }
+        _uiState.update { it.copy(preferGpu = enginePrefs.preferGpu) }
+        refreshStorageState()
         initGeminiApi()
         loadSavedSettings()
+        viewModelScope.launch(Dispatchers.IO) { sweepTempDownloads() }
     }
 
     // ── Persistence ─────────────────────────────────────────────────
@@ -180,7 +226,9 @@ class ChatViewModel(
     private fun initGeminiApi() {
         try {
             val client = OkHttpClient.Builder()
-                .addInterceptor(HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC })
+                // Keep logging OFF: BASIC logs the request URL, and the Gemini key is passed
+                // as a ?key= query param — logging it would leak the key into logcat.
+                .addInterceptor(HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.NONE })
                 .connectTimeout(30, TimeUnit.SECONDS)
                 .readTimeout(120, TimeUnit.SECONDS)
                 .writeTimeout(120, TimeUnit.SECONDS)
@@ -198,21 +246,49 @@ class ChatViewModel(
 
     // ── Model Scanning ──────────────────────────────────────────────
 
-    private fun modelsDir(): File {
-        val dir = File(application.filesDir, MODELS_DIR)
-        if (!dir.exists()) dir.mkdirs()
-        return dir
-    }
+    /** Where a NEW download goes. Always MEDHA's own folder — see [ModelStorage.downloadRoot]. */
+    private fun modelsDir(): File = ModelStorage.downloadRoot(application)
 
     fun scanAvailableModels() {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch(Dispatchers.IO) { scanModelsNow() }
+    }
+
+    /**
+     * The scan itself, awaitable.
+     *
+     * Engine init used to fire [scanAvailableModels] and then `delay(500)`, hoping the scan had
+     * finished. It often had not — a SAF query over a shared folder is much slower than a
+     * `File.listFiles()` — so `selectedModel` was still null and the engine reported
+     * "Model not found" for a model that was sitting right there. Awaiting the real work removes
+     * the guess.
+     */
+    private suspend fun scanModelsNow() {
+        withContext(Dispatchers.IO) {
             try {
-                val models = modelsDir().listFiles()
-                    ?.filter { f -> f.isFile && f.length() > 0 && ModelInfo.SUPPORTED_EXTENSIONS.any { f.name.endsWith(it, true) } }
-                    ?.map { ModelInfo.fromFileName(it.name, it.absolutePath, it.length()) }
+                // MEDHA's own models, plus anything in the shared folder the user granted. Both
+                // are always listed, so a model another app already downloaded is used rather
+                // than downloaded again — whichever way the storage setting happens to point.
+                val local = (modelsDir().listFiles()?.toList() ?: emptyList())
+                    .filter { f -> f.isFile && f.length() > 0 && ModelInfo.isModelFile(f.name, f.length()) }
+                    .map { ModelInfo.fromFileName(it.name, it.absolutePath, it.length()) }
+
+                // Anything in the granted folder (one level of subfolders included), plus any
+                // model files the user handed over individually.
+                val fromFolder = ModelStorage.sharedTreeUri(application)
+                    ?.let { ExternalModelStore.listModels(application, it) }
                     ?: emptyList()
+                val fromFiles = ModelStorage.sharedFileUris(application)
+                    .mapNotNull { ExternalModelStore.describeFile(application, it) }
+                val sharedSeen = mutableSetOf<String>()
+                val shared = (fromFolder + fromFiles).filter { sharedSeen.add(it.filePath) }
+
+                // A file name present in both places is the same weights twice; prefer the local
+                // copy, which needs no fd bridge to open.
+                val localNames = local.map { it.fileName.lowercase() }.toSet()
+                val models = local + shared.filterNot { it.fileName.lowercase() in localNames }
 
                 _uiState.update { it.copy(availableModels = models) }
+                refreshStorageState()
 
                 if (models.isNotEmpty()) {
                     addLog(LogLevel.INFO, TAG, "Found ${models.size} model(s)")
@@ -252,6 +328,12 @@ class ChatViewModel(
     }
 
     fun deleteModel(model: ModelInfo) {
+        // A shared-folder model is the user's own file and may be in use by their other apps —
+        // MEDHA does not own it and must not delete it. "Remove folder" is the way out.
+        if (model.isShared) {
+            addLog(LogLevel.WARNING, TAG, "${model.fileName} lives in the shared folder — not deleting it")
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val file = File(model.filePath)
@@ -278,10 +360,49 @@ class ChatViewModel(
         addLog(LogLevel.INFO, TAG, "Switching to: ${model.fileName}")
         _uiState.update { it.copy(selectedModel = model) }
         if (_uiState.value.appMode is AppMode.Offline) {
-            destroyEngine()
-            initializeEngine()
+            viewModelScope.launch(Dispatchers.IO) {
+                cancelActiveGeneration()
+                destroyEngine()
+                initializeEngine()
+            }
         }
     }
+
+    // ── Load / Unload ───────────────────────────────────────────────
+
+    /**
+     * Drop the model out of RAM without forgetting which one is selected.
+     *
+     * Worth having explicitly: a loaded Gemma 4 holds ~2.5 GB of mapped weights plus its KV
+     * cache, and until now the only ways to release that were switching mode or killing the app.
+     * The selection survives, so [loadModel] brings the same model back.
+     */
+    fun unloadModel() {
+        viewModelScope.launch(Dispatchers.IO) {
+            cancelActiveGeneration()
+            destroyEngine()
+            try { MedhaService.stop(application) } catch (_: Exception) {}
+            _uiState.update {
+                it.copy(
+                    modelStatus = ModelStatus.Idle,
+                    offlineContextLength = 0,
+                    offlineMtpActive = false
+                )
+            }
+            addLog(LogLevel.INFO, TAG, "Model unloaded — memory released")
+        }
+    }
+
+    /** Load the currently selected model. No-op while one is already loaded or loading. */
+    fun loadModel() {
+        val status = _uiState.value.modelStatus
+        if (status is ModelStatus.Ready || status is ModelStatus.Loading || status is ModelStatus.Initializing) return
+        addLog(LogLevel.INFO, TAG, "Loading model on request")
+        initializeEngine()
+    }
+
+    /** True when a model is selected but not currently resident — drives the Load/Unload button. */
+    val isModelLoaded: Boolean get() = engine != null
 
     // ── Mode Switching ──────────────────────────────────────────────
 
@@ -292,7 +413,10 @@ class ChatViewModel(
         saveMode()
         when (mode) {
             is AppMode.Online -> {
-                destroyEngine()
+                viewModelScope.launch(Dispatchers.IO) {
+                    cancelActiveGeneration()
+                    destroyEngine()
+                }
                 MedhaService.stop(application)
                 if (_uiState.value.hasAnyValidatedKey) {
                     _uiState.update { it.copy(modelStatus = ModelStatus.Ready) }
@@ -606,6 +730,7 @@ class ChatViewModel(
 
     // ── LiteRT LM Engine (Offline) ──────────────────────────────────
 
+    @OptIn(ExperimentalApi::class)
     fun initializeEngine() {
         if (_uiState.value.appMode is AppMode.Online) {
             _uiState.update {
@@ -624,14 +749,14 @@ class ChatViewModel(
                     it.copy(
                         modelStatus = ModelStatus.Initializing,
                         offlineVisionAvailable = true,
-                        offlineAudioAvailable = true
+                        offlineAudioAvailable = true,
+                        offlineContextLength = 0,
+                        offlineMtpActive = false
                     )
                 }
 
-                if (_uiState.value.selectedModel == null) {
-                    scanAvailableModels()
-                    kotlinx.coroutines.delay(500)
-                }
+                // Wait for the real scan rather than guessing at a delay — see [scanModelsNow].
+                if (_uiState.value.selectedModel == null) scanModelsNow()
 
                 val modelToLoad = _uiState.value.selectedModel
                 if (modelToLoad == null) {
@@ -640,51 +765,181 @@ class ChatViewModel(
                     return@launch
                 }
 
-                val modelFile = File(modelToLoad.filePath)
-                if (!modelFile.exists()) {
-                    _uiState.update { it.copy(modelStatus = ModelStatus.ModelNotFound) }
-                    return@launch
+                // A shared model lives in the user's own folder and is reached through SAF, so
+                // its "filePath" is a document URI. openForEngine turns that into a path the
+                // native loader can open — a direct path when the file is plainly readable,
+                // otherwise a /proc/self/fd alias whose descriptor must outlive the engine.
+                val handle = if (modelToLoad.isShared) {
+                    ExternalModelStore.openForEngine(application, modelToLoad.filePath).also {
+                        if (it == null) {
+                            addLog(LogLevel.INFO, TAG,
+                                "${modelToLoad.fileName} is in the shared folder — it must be copied in before it can load")
+                            _uiState.update { s ->
+                                s.copy(modelStatus = ModelStatus.Error(
+                                    "Shared models must be copied into MEDHA before they can run. " +
+                                        "Tap \"Copy into MEDHA\" next to the model in Settings."
+                                ))
+                            }
+                        }
+                    } ?: return@launch
+                } else {
+                    val f = File(modelToLoad.filePath)
+                    if (!f.exists()) {
+                        _uiState.update { it.copy(modelStatus = ModelStatus.ModelNotFound) }
+                        return@launch
+                    }
+                    ExternalModelStore.EngineHandle(f.absolutePath, null)
                 }
+                modelHandle?.close()
+                modelHandle = handle
+                val modelPath = handle.path
 
-                addLog(LogLevel.INFO, TAG, "Loading ${modelToLoad.fileName} (${modelToLoad.sizeInMb}MB)...")
+                addLog(LogLevel.INFO, TAG,
+                    "Loading ${modelToLoad.fileName} (${modelToLoad.sizeInMb}MB)" +
+                        if (modelToLoad.isShared) " from shared folder${if (handle.isDirectPath) "" else " (fd)"}" else "")
                 _uiState.update { it.copy(modelStatus = ModelStatus.Loading(0f, "Preparing engine...")) }
 
-                val modelMaxTokens = if (modelToLoad.isLiteRtFormat) maxTokens else 1024
                 val catalogModel = ModelCatalog.findByFileName(modelToLoad.fileName)
                 val hasVision = catalogModel?.supportsImage == true
                 val hasAudio = catalogModel?.supportsAudio == true
+                // Context window = the KV cache, and the KV cache is what actually kills the app.
+                //
+                // This used to allocate the model's ADVERTISED maximum (Gemma 4 = 32K), ignoring
+                // both the user's token budget and the device. Measured on a 7.5 GB phone
+                // 2026-08-12: 2.4 GB of weights plus a 32K cache took MEDHA's RSS to 3.84 GB,
+                // Android's lowmemorykiller started reclaiming apps across the system
+                // ("critical pressure and device is low on memory") and killed MEDHA too.
+                //
+                // A SIGKILL throws nothing, so the out-of-memory rung of the retry ladder below
+                // can never run — the only defence is not to ask for too much in the first place.
+                // Koeyomi asks for 1024 and never sees this.
+                val deviceCap = contextCapForDevice(modelToLoad.sizeInMb)
+                _uiState.update { it.copy(deviceContextCap = deviceCap) }
+                val advertised = catalogModel?.maxContext ?: maxTokens
+                val fullContext = if (modelToLoad.isLiteRtFormat) {
+                    minOf(advertised, maxTokens.coerceAtLeast(1024), deviceCap)
+                } else 1024
+                val minContext = 1024
+                if (fullContext < advertised) {
+                    addLog(LogLevel.INFO, TAG,
+                        "Context capped at $fullContext tokens (model advertises $advertised, " +
+                            "device budget $deviceCap, your setting $maxTokens)")
+                }
+
+                // Multi-Token Prediction (speculative decoding) is a GLOBAL runtime flag.
+                // Gemma 4's capability probe returns true even for the standard build, but
+                // turning it on saturates the mobile CPU (drafter + verify with no spare
+                // parallel compute) and tanks throughput to ~0.2 tok/s. So enable it ONLY for
+                // models explicitly marked as MTP in the catalog, and only if the build
+                // actually carries the drafter. Standard models always run with it OFF.
+                val mtpActive = if (modelToLoad.isLiteRtFormat && catalogModel?.usesMtp == true) {
+                    try {
+                        Capabilities(modelPath).use { it.hasSpeculativeDecodingSupport() }
+                    } catch (e: Exception) {
+                        addLog(LogLevel.WARNING, TAG, "MTP capability probe failed: ${e.message}")
+                        false
+                    }
+                } else false
+                ExperimentalFlags.enableSpeculativeDecoding = mtpActive
+                addLog(LogLevel.INFO, TAG,
+                    if (mtpActive) "Multi-Token Prediction (speculative decoding) ENABLED"
+                    else "Speculative decoding OFF (standard generation)")
 
                 _uiState.update { it.copy(modelStatus = ModelStatus.Loading(0.3f, "Loading weights...")) }
 
-                // Build the engine. Some model bundles ship a multimodal (vision/audio)
-                // encoder that a given runtime/device can't load — e.g. LiteRT-LM rejecting
-                // a multi-signature vision encoder ("Vision Encoder model must have exactly
-                // one signature but got 3"). Instead of failing the whole engine, fall back
-                // to text-only so the model still works.
+                // Build the engine with graceful degradation. Two things can fail at create time:
+                //  1) A multimodal (vision/audio) encoder the runtime can't load — e.g. LiteRT-LM
+                //     rejecting a multi-signature vision encoder. → retry text-only.
+                //  2) Not enough memory to allocate the full context KV-cache on this device.
+                //     → retry with a halved context until it fits (down to minContext).
                 var visionEnabled = hasVision
                 var audioEnabled = hasAudio
+                var contextTokens = fullContext
 
-                fun buildEngine(vision: Boolean, audio: Boolean) = Engine(
-                    EngineConfig(
-                        modelPath = modelFile.absolutePath,
-                        backend = Backend.CPU(),
-                        visionBackend = if (vision) Backend.GPU() else null,
-                        audioBackend = if (audio) Backend.CPU() else null,
-                        maxNumTokens = modelMaxTokens
-                    )
-                ).also { it.initialize() }
-
-                engine = try {
-                    buildEngine(visionEnabled, audioEnabled)
-                } catch (e: Exception) {
-                    if ((visionEnabled || audioEnabled) && isMultimodalLoadError(e)) {
-                        addLog(LogLevel.WARNING, TAG,
-                            "Multimodal load failed (${e.message}); retrying text-only")
-                        visionEnabled = false
-                        audioEnabled = false
-                        buildEngine(false, false)
-                    } else throw e
+                // GPU FIRST — for text as well as vision. The main backend was hardcoded to CPU
+                // before, so the GPU chip in Configurations changed nothing at all.
+                //
+                // Both fall back to CPU on any create failure we can catch. The one we CANNOT
+                // catch is a native GPU crash, which kills the process before any `catch` runs —
+                // EnginePrefs' in-flight flag turns that into a recorded crash on the next launch
+                // instead of a boot loop.
+                val modelSupportsGpu = catalogModel?.supportsGpu ?: true
+                val gpuCrashedBefore = enginePrefs.gpuCrashedFor == modelToLoad.fileName
+                var mainOnGpu = enginePrefs.preferGpu && modelSupportsGpu && !gpuCrashedBefore
+                var visionOnGpu = mainOnGpu
+                if (gpuCrashedBefore) {
+                    addLog(LogLevel.WARNING, TAG,
+                        "GPU previously crashed loading ${modelToLoad.fileName} — using CPU. " +
+                            "Re-enable GPU in Configurations to try again.")
                 }
+
+                // The GPU marker is NOT cleared here. Engine create succeeds on GPU and the
+                // process dies later, on RenderThread — clearing on create meant the crash was
+                // never recorded and every relaunch repeated it. It is cleared in
+                // sendOfflineMessage once a generation completes, which is the first point the
+                // GPU has actually proved itself.
+                fun buildEngine(vision: Boolean, audio: Boolean, ctx: Int, mainGpu: Boolean, visGpu: Boolean): Engine {
+                    if (mainGpu || (vision && visGpu)) enginePrefs.markGpuAttempt(modelToLoad.fileName)
+                    return Engine(
+                        EngineConfig(
+                            modelPath = modelPath,
+                            backend = if (mainGpu) Backend.GPU() else Backend.CPU(),
+                            visionBackend = if (vision) (if (visGpu) Backend.GPU() else Backend.CPU()) else null,
+                            audioBackend = if (audio) Backend.CPU() else null,
+                            maxNumTokens = ctx
+                        )
+                    ).also { it.initialize() }
+                }
+
+                var built: Engine? = null
+                var lastError: Exception? = null
+                while (built == null) {
+                    try {
+                        built = buildEngine(visionEnabled, audioEnabled, contextTokens, mainOnGpu, visionOnGpu)
+                    } catch (e: Exception) {
+                        lastError = e
+                        when {
+                            isOutOfMemoryError(e) && contextTokens > minContext -> {
+                                val reduced = (contextTokens / 2).coerceAtLeast(minContext)
+                                addLog(LogLevel.WARNING, TAG,
+                                    "Not enough memory for ${contextTokens}-token context; retrying at $reduced")
+                                contextTokens = reduced
+                            }
+                            visionEnabled && visionOnGpu -> {
+                                addLog(LogLevel.WARNING, TAG,
+                                    "Engine create failed on GPU vision (${e.message}); retrying with CPU vision")
+                                visionOnGpu = false
+                            }
+                            mainOnGpu -> {
+                                addLog(LogLevel.WARNING, TAG,
+                                    "Engine create failed on GPU (${e.message}); retrying on CPU")
+                                mainOnGpu = false
+                            }
+                            // Any remaining create failure, not just ones whose message happens to
+                            // mention an encoder: the old gate looked for "vision"/"audio"/
+                            // "signature", so a multimodal model that failed with
+                            // "Unsupported or unknown file format" never got its text-only retry
+                            // and the whole load was reported as broken.
+                            visionEnabled || audioEnabled -> {
+                                addLog(LogLevel.WARNING, TAG,
+                                    "Engine create failed (${e.message}); retrying text-only")
+                                visionEnabled = false
+                                audioEnabled = false
+                                visionOnGpu = true
+                            }
+                            // Last resort: a context smaller than the catalog claims. Some model
+                            // builds advertise a window the runtime will not actually allocate.
+                            contextTokens > minContext -> {
+                                val reduced = (contextTokens / 2).coerceAtLeast(minContext)
+                                addLog(LogLevel.WARNING, TAG,
+                                    "Engine create failed at ${contextTokens} tokens; retrying at $reduced")
+                                contextTokens = reduced
+                            }
+                            else -> throw lastError
+                        }
+                    }
+                }
+                engine = built
 
                 _uiState.update { it.copy(modelStatus = ModelStatus.Loading(0.8f, "Creating conversation...")) }
                 val samplerConfig = SamplerConfig(topK = topK, topP = topP, temperature = temperature)
@@ -693,28 +948,83 @@ class ChatViewModel(
                 )
 
                 val features = buildList {
-                    add("CPU")
-                    if (visionEnabled) add("Vision(GPU)")
+                    add(if (mainOnGpu) "GPU" else "CPU")
+                    if (visionEnabled) add(if (visionOnGpu) "Vision(GPU)" else "Vision(CPU)")
                     if (audioEnabled) add("Audio")
                 }.joinToString(", ")
                 _uiState.update {
                     it.copy(
                         modelStatus = ModelStatus.Ready,
                         offlineVisionAvailable = visionEnabled,
-                        offlineAudioAvailable = audioEnabled
+                        offlineAudioAvailable = audioEnabled,
+                        offlineContextLength = contextTokens,
+                        offlineMtpActive = mtpActive
                     )
                 }
-                addLog(LogLevel.INFO, TAG, "Engine ready: ${modelToLoad.displayName} (LiteRT LM, $features, ${modelMaxTokens} tokens)")
+                addLog(LogLevel.INFO, TAG, "Engine ready: ${modelToLoad.displayName} (LiteRT LM, $features, ${contextTokens} tokens)")
 
-                // Start foreground service to keep model alive in background
-                MedhaService.start(application)
+                // Start foreground service to keep model alive in background.
+                // MUST NOT be inside the engine-init try: if the app happens to be in the
+                // background when loading finishes, startForegroundService throws
+                // ForegroundServiceStartNotAllowedException (API 31+) — and the outer catch
+                // would then mark a perfectly good engine as failed and destroy it.
+                try {
+                    MedhaService.start(application)
+                } catch (e: Exception) {
+                    addLog(LogLevel.WARNING, TAG, "Background service not started (app not in foreground): ${e.message}")
+                }
 
             } catch (e: Exception) {
                 addLog(LogLevel.ERROR, TAG, "Init failed: ${e.message}")
-                _uiState.update { it.copy(modelStatus = ModelStatus.Error(e.message ?: "Unknown error")) }
+                _uiState.update { it.copy(modelStatus = ModelStatus.Error(friendlyEngineError(e)), offlineContextLength = 0, offlineMtpActive = false) }
                 destroyEngine()
             }
         }
+    }
+
+    /**
+     * How large a context this device can afford for a model of [modelSizeMb], in tokens.
+     *
+     * Android reclaims an app long before it can OOM gracefully, so this is a budget, not a
+     * limit to be discovered by failing. The rule: the model's weights plus its KV cache should
+     * stay under roughly half of total RAM, because crossing that on a 7.5 GB phone is what
+     * triggered `lowmemorykiller: critical pressure and device is low on memory` and took MEDHA
+     * (and several unrelated apps) down with it.
+     *
+     * The per-token cost is approximated rather than derived — LiteRT-LM does not expose it, and
+     * it varies by architecture — so the tiers below are deliberately conservative. The user can
+     * still raise the ceiling with the token slider in Configurations; this only decides the
+     * DEFAULT, and a default that kills the app is not a useful default.
+     */
+    private fun contextCapForDevice(modelSizeMb: Long): Int {
+        val am = application.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val info = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+        val totalMb = info.totalMem / (1024 * 1024)
+        val availableMb = info.availMem / (1024 * 1024)
+
+        // Do NOT subtract the model size. Weights are mmap'd from a file, so those pages are
+        // file-backed and evictable under pressure — measured on device, a 2468 MB model sat at
+        // ~1000 MB RSS after loading, not 2468 MB. Subtracting the full size (an earlier version
+        // of this function did) made the budget negative and pinned every device to 1024 tokens
+        // no matter how much memory it had.
+        //
+        // What actually costs anonymous, non-evictable memory is the KV cache. Its size is
+        // measurable: the 2026-08-12 crash grew RSS from 1.0 GB to 7.22 GB for a 32768-token
+        // window — about 190 KB per token for Gemma 4 E2B. Budget against that, conservatively.
+        val kvBudgetMb = minOf(availableMb / 2, (totalMb * 35) / 100) - SAFETY_MARGIN_MB
+        val affordableTokens = if (kvBudgetMb <= 0) 0L else (kvBudgetMb * 1024) / KV_KB_PER_TOKEN
+
+        // Round down to a sensible window rather than an arbitrary number.
+        val cap = when {
+            affordableTokens >= 8192 -> 8192
+            affordableTokens >= 4096 -> 4096
+            affordableTokens >= 2048 -> 2048
+            else -> 1024
+        }
+        addLog(LogLevel.DEBUG, TAG,
+            "Device RAM ${totalMb}MB total / ${availableMb}MB free → KV budget ${kvBudgetMb}MB " +
+                "(~$affordableTokens tokens at ${KV_KB_PER_TOKEN}KB each) → context cap $cap")
+        return cap
     }
 
     /**
@@ -731,11 +1041,52 @@ class ChatViewModel(
             "encoder" in msg
     }
 
+    /** Does this generation failure look like the conversation outgrew the context window? */
+    private fun isContextOverflowError(e: Throwable): Boolean {
+        val m = (e.message ?: "").lowercase()
+        val mentionsContext = "context" in m || "token" in m || "kv" in m || "sequence" in m
+        val mentionsLimit = "exceed" in m || "too long" in m || "overflow" in m ||
+            "out of range" in m || "maximum" in m || "max num" in m || "full" in m
+        return mentionsContext && mentionsLimit
+    }
+
+    /** Does this failure look like the device ran out of memory for the requested context? */
+    private fun isOutOfMemoryError(e: Throwable): Boolean {
+        if (e is OutOfMemoryError) return true
+        val msg = (e.message ?: "").lowercase()
+        return "out of memory" in msg ||
+            "oom" in msg ||
+            "resource_exhausted" in msg ||
+            "failed to allocate" in msg ||
+            "cannot allocate" in msg ||
+            "bad_alloc" in msg
+    }
+
+    /**
+     * Map a raw engine-create failure to a user-readable message. Notably, web-only model
+     * builds (e.g. the "-web" LiteRT variants) lack the Android prefill/decode signatures and
+     * fail with "NOT_FOUND: TF_LITE_PREFILL_DECODE not found in the model" — tell the user to
+     * pick a different model rather than showing the raw runtime string.
+     */
+    private fun friendlyEngineError(e: Throwable): String {
+        val msg = e.message ?: "Unknown error"
+        return when {
+            "TF_LITE_PREFILL_DECODE" in msg ||
+                ("NOT_FOUND" in msg && "not found in the model" in msg) ->
+                "This model build isn't compatible with the on-device runtime " +
+                    "(missing prefill/decode). Pick a different model in Settings."
+            else -> msg
+        }
+    }
+
     private fun destroyEngine() {
         try { conversation?.close() } catch (_: Exception) {}
         try { engine?.close() } catch (_: Exception) {}
         conversation = null
         engine = null
+        // Strictly after the engine: the fd backs its mmap.
+        try { modelHandle?.close() } catch (_: Exception) {}
+        modelHandle = null
     }
 
     fun resetConversation() {
@@ -777,11 +1128,87 @@ class ChatViewModel(
         }
     }
 
+    /**
+     * Regenerate the most recent answer: drop the last user turn and everything after it,
+     * then resend that same prompt (and image, if any).
+     */
+    fun regenerateLastResponse() {
+        if (_uiState.value.isGenerating) return
+        val msgs = _uiState.value.messages
+        val lastUserIdx = msgs.indexOfLast { it.user is User.Person }
+        if (lastUserIdx < 0) return
+        val userMsg = msgs[lastUserIdx]
+        viewModelScope.launch(Dispatchers.IO) {
+            cancelActiveGeneration()
+            _uiState.update { it.copy(messages = it.messages.take(lastUserIdx)) }
+            withContext(Dispatchers.Main) {
+                if (userMsg.imageUri != null) _uiState.update { it.copy(pendingImageUri = userMsg.imageUri) }
+                sendMessage(userMsg.text)
+            }
+        }
+    }
+
+    /**
+     * Stop an in-flight response. Asks the native engine to halt first (offline),
+     * then cancels the coroutine and keeps whatever was already streamed so the
+     * partial answer isn't lost.
+     */
+    fun stopGeneration() {
+        if (!_uiState.value.isGenerating) return
+        Log.e(TAG, "stopGeneration() called by user — cancelling in-flight response")
+        addLog(LogLevel.WARNING, TAG, "Generation stopped by user")
+        try {
+            conversation?.cancelProcess()
+        } catch (e: Exception) {
+            Log.e(TAG, "cancelProcess() failed", e)
+            addLog(LogLevel.ERROR, TAG, "cancelProcess failed: ${e.message}")
+        }
+        generationJob?.cancel()
+        generationJob = null
+
+        val partialText = _uiState.value.streamingText.trim()
+        val partialThinking = _uiState.value.streamingThinking.trim().ifEmpty { null }
+        _uiState.update { s ->
+            val msgs = if (partialText.isNotEmpty()) {
+                s.messages + Message(
+                    text = partialText,
+                    user = User.AI,
+                    thinkingText = partialThinking,
+                    provider = if (s.appMode is AppMode.Online) "gemini" else "offline"
+                )
+            } else s.messages
+            s.copy(messages = msgs, isGenerating = false, streamingText = "", streamingThinking = "", isThinking = false)
+        }
+        if (partialText.isNotEmpty()) {
+            saveCurrentGrandMasterChat()
+            saveCurrentChatSession()
+        }
+    }
+
+    /**
+     * Cancel any in-flight generation and WAIT for it to fully stop before the caller
+     * mutates the engine/conversation/session. This is what prevents the native
+     * use-after-close race when switching model/mode/config or loading a session while
+     * a response is streaming.
+     */
+    private suspend fun cancelActiveGeneration() {
+        val job = generationJob
+        if (job != null && job.isActive) {
+            try { conversation?.cancelProcess() } catch (_: Exception) {}
+            try { job.cancelAndJoin() } catch (_: Exception) {}
+        }
+        generationJob = null
+        if (_uiState.value.isGenerating) {
+            _uiState.update { it.copy(isGenerating = false, streamingText = "", streamingThinking = "", isThinking = false) }
+        }
+    }
+
     // ── Offline: LiteRT LM Streaming ────────────────────────────────
 
     private fun sendOfflineMessage(prompt: String, imageUri: String?) {
-        viewModelScope.launch(Dispatchers.IO) {
+        generationJob = viewModelScope.launch(Dispatchers.IO) {
             try {
+                try { MedhaService.inferenceOn(application) } catch (_: Exception) {}
                 val conv = conversation
                 if (conv == null) {
                     appendAiMessage("Engine not loaded. Go to Settings to initialize.", provider = "offline")
@@ -881,6 +1308,11 @@ class ChatViewModel(
                 val ttft = if (firstTokenTime > 0) firstTokenTime - startTime else elapsed
                 val clean = result.trim()
 
+                // A generation finished without taking the process down, so whatever backend is
+                // loaded is safe on this device. This is the earliest honest point to clear the
+                // GPU crash marker — engine create returning is not proof of anything.
+                enginePrefs.clearGpuAttempt()
+
                 if (clean.isEmpty()) {
                     appendAiMessage("Empty response. Try rephrasing.", provider = "offline")
                 } else {
@@ -891,10 +1323,20 @@ class ChatViewModel(
 
                 _uiState.update { it.copy(isGenerating = false, streamingText = "", streamingThinking = "", isThinking = false) }
 
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                // User pressed Stop — stopGeneration() already handled UI/partial text.
+                throw ce
             } catch (e: Exception) {
+                Log.e(TAG, "Offline generation error", e)
                 addLog(LogLevel.ERROR, TAG, "Offline error: ${e.message}")
-                appendAiMessage("Error: ${e.message}", provider = "offline")
+                val msg = if (isContextOverflowError(e))
+                    "This chat has reached the model's context limit. Tap New Chat (＋) to keep going."
+                else "Error: ${e.message}"
+                appendAiMessage(msg, provider = "offline")
                 _uiState.update { it.copy(isGenerating = false, streamingText = "", streamingThinking = "", isThinking = false) }
+            } finally {
+                try { MedhaService.inferenceOff(application) } catch (_: Exception) {}
+                if (generationJob === coroutineContext[Job]) generationJob = null
             }
         }
     }
@@ -951,7 +1393,7 @@ class ChatViewModel(
     // ── Online: Gemini API with Failover ────────────────────────────
 
     private fun sendOnlineMessage(prompt: String, imageUri: String?) {
-        viewModelScope.launch(Dispatchers.IO) {
+        generationJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 val validKeys = _uiState.value.validatedKeys
                 if (validKeys.isEmpty()) {
@@ -973,8 +1415,8 @@ class ChatViewModel(
                     try {
                         val base64 = encodeImageToBase64(Uri.parse(imageUri))
                         if (base64 != null) {
-                            val mimeType = application.contentResolver.getType(Uri.parse(imageUri)) ?: "image/jpeg"
-                            currentParts.add(GeminiPart(inlineData = InlineData(mimeType = mimeType, data = base64)))
+                            // encodeImageToBase64 always re-encodes to JPEG, so the mime is fixed.
+                            currentParts.add(GeminiPart(inlineData = InlineData(mimeType = "image/jpeg", data = base64)))
                         }
                     } catch (e: Exception) { addLog(LogLevel.ERROR, TAG, "Image encode: ${e.message}") }
                 }
@@ -1000,9 +1442,16 @@ class ChatViewModel(
 
                 val prevMessages = _uiState.value.messages.dropLast(1)
                 val isGrandMasterActive = gmSystemPrompt != null
-                val messagesToSend = if (isGrandMasterActive && prevMessages.isNotEmpty()) prevMessages.drop(1) else prevMessages
+                val trimmed = if (isGrandMasterActive && prevMessages.isNotEmpty()) prevMessages.drop(1) else prevMessages
+                // Cap resent history to the most recent turns so the request can't grow
+                // unbounded (latency, quota, eventual 400s). Keep the last MAX_HISTORY_MESSAGES.
+                val messagesToSend = if (trimmed.size > MAX_ONLINE_HISTORY_MESSAGES)
+                    trimmed.takeLast(MAX_ONLINE_HISTORY_MESSAGES) else trimmed
                 for (msg in messagesToSend) {
-                    if (msg.imageUri == null) {
+                    // Keep the TEXT of every turn — even ones that had an image attached — so
+                    // multi-turn vision follow-ups don't lose context (we just skip re-uploading
+                    // the image bytes). Drop only genuinely empty placeholder turns.
+                    if (msg.text.isNotBlank()) {
                         contents.add(GeminiContent(
                             role = if (msg.user is User.Person) "user" else "model",
                             parts = listOf(GeminiPart(text = msg.text))
@@ -1048,14 +1497,21 @@ class ChatViewModel(
                             tokenCount = tokens, latencyMs = elapsed, tokensPerSec = tps, provider = "gemini")
                         _uiState.update { it.copy(messages = it.messages + msg) }
                         saveCurrentGrandMasterChat()
+                        saveCurrentChatSession()
                         addLog(LogLevel.INFO, TAG, "Online: ${elapsed}ms, ~$tokens tokens")
                     }
                 }
                 _uiState.update { it.copy(isGenerating = false) }
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                // User pressed Stop — stopGeneration() already handled UI/partial text.
+                throw ce
             } catch (e: Exception) {
+                Log.e(TAG, "Online generation error", e)
                 addLog(LogLevel.ERROR, TAG, "Online error: ${e.message}")
                 appendAiMessage("Connection error: ${e.message}", provider = "gemini")
                 _uiState.update { it.copy(isGenerating = false) }
+            } finally {
+                if (generationJob === coroutineContext[Job]) generationJob = null
             }
         }
     }
@@ -1115,11 +1571,39 @@ class ChatViewModel(
         return null
     }
 
+    /** Downscale + JPEG-encode an image to base64 for the online (Gemini) path, so we don't
+     *  upload a full-resolution photo (bandwidth + OOM on readBytes of a huge file). Output is
+     *  always JPEG — callers must use mime type image/jpeg. */
     private fun encodeImageToBase64(uri: Uri): String? {
         return try {
-            val bytes = application.contentResolver.openInputStream(uri)?.readBytes() ?: return null
-            Base64.encodeToString(bytes, Base64.NO_WRAP)
-        } catch (e: Exception) { null }
+            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            application.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
+            val ow = opts.outWidth; val oh = opts.outHeight
+            if (ow <= 0 || oh <= 0) {
+                val bytes = application.contentResolver.openInputStream(uri)?.readBytes() ?: return null
+                return Base64.encodeToString(bytes, Base64.NO_WRAP)
+            }
+            val target = 1024
+            var sample = 1
+            while (ow / sample > target * 2 || oh / sample > target * 2) sample *= 2
+            val loadOpts = BitmapFactory.Options().apply { inSampleSize = sample }
+            val sampled = application.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, loadOpts)
+            } ?: return null
+            val longest = maxOf(sampled.width, sampled.height)
+            val scaled = if (longest > target) {
+                val s = target.toFloat() / longest
+                Bitmap.createScaledBitmap(sampled, (sampled.width * s).toInt().coerceAtLeast(1), (sampled.height * s).toInt().coerceAtLeast(1), true)
+                    .also { if (it !== sampled) sampled.recycle() }
+            } else sampled
+            val out = ByteArrayOutputStream()
+            scaled.compress(Bitmap.CompressFormat.JPEG, 90, out)
+            scaled.recycle()
+            Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+        } catch (e: Exception) {
+            addLog(LogLevel.ERROR, TAG, "Image encode (base64) failed: ${e.message}")
+            null
+        }
     }
 
     // ── Model Download ──────────────────────────────────────────────
@@ -1132,14 +1616,48 @@ class ChatViewModel(
                 _uiState.update { it.copy(catalogDownloadProgress = it.catalogDownloadProgress + (catalogModel.id to 0f)) }
                 addLog(LogLevel.INFO, TAG, "Downloading ${catalogModel.name} (${catalogModel.sizeLabel})...")
 
-                val destDir = modelsDir()
-                val tmpFile = File(destDir, "${catalogModel.fileName}$TMP_EXT")
-                val finalFile = File(destDir, catalogModel.fileName)
+                // Download INTO the shared folder when the user granted one — the whole point is
+                // that the next app finds the weights already there. SAF's tree grant covers
+                // creating documents, so this needs no storage permission.
+                val sharedTree = ModelStorage.sharedTreeUri(application)
+                    ?.takeIf { ExternalModelStore.canWrite(application, it) }
+                val sink: ModelDownloadSink = if (sharedTree != null) {
+                    SafDownloadSink(application, sharedTree, catalogModel.fileName, TMP_EXT)
+                } else {
+                    FileDownloadSink(modelsDir(), catalogModel.fileName, TMP_EXT)
+                }
 
-                if (finalFile.exists() && finalFile.length() > 0) {
-                    addLog(LogLevel.INFO, TAG, "${catalogModel.fileName} already exists")
+                // If the model is already present anywhere MEDHA can see — the shared folder,
+                // because another app downloaded it or it was copied in from a PC — there is
+                // nothing to do. That is the entire point of the shared folder.
+                val existing = findAvailable(catalogModel.fileName)
+                if (existing != null) {
+                    addLog(LogLevel.INFO, TAG,
+                        "${catalogModel.fileName} already present" +
+                            if (existing.isShared) " in the shared folder" else "")
                     _uiState.update { it.copy(catalogDownloadProgress = it.catalogDownloadProgress - catalogModel.id) }
                     scanAvailableModels()
+                    return@launch
+                }
+                addLog(LogLevel.INFO, TAG, "Saving to ${sink.label}")
+
+                // Storage pre-check: refuse to start if there isn't room (+50MB headroom),
+                // accounting for any partially-downloaded temp file we can resume. A sink that
+                // cannot report free space (-1) is not second-guessed.
+                val alreadyHave = sink.partialBytes()
+                val remainingBytes = (catalogModel.sizeBytes - alreadyHave).coerceAtLeast(0L)
+                val headroom = 50L * 1024 * 1024
+                val free = sink.usableSpace()
+                if (catalogModel.sizeBytes > 0 && free >= 0 && free < remainingBytes + headroom) {
+                    val needMb = remainingBytes / (1024 * 1024)
+                    val freeMb = free / (1024 * 1024)
+                    addLog(LogLevel.ERROR, TAG, "Not enough storage for ${catalogModel.name}: need ~${needMb}MB free, only ${freeMb}MB available")
+                    _uiState.update {
+                        it.copy(
+                            catalogDownloadProgress = it.catalogDownloadProgress - catalogModel.id,
+                            downloadError = "Not enough storage for ${catalogModel.name} — free up ~${needMb}MB and try again."
+                        )
+                    }
                     return@launch
                 }
 
@@ -1148,7 +1666,7 @@ class ChatViewModel(
                 while (attempt < maxRetries) {
                     attempt++
                     try {
-                        var startByte = if (tmpFile.exists()) tmpFile.length() else 0L
+                        var startByte = sink.partialBytes()
                         val conn = URL(catalogModel.downloadUrl).openConnection() as HttpURLConnection
                         conn.connectTimeout = 30_000
                         conn.readTimeout = 60_000
@@ -1160,10 +1678,34 @@ class ChatViewModel(
                             conn.disconnect()
                             throw Exception("HTTP ${conn.responseCode}")
                         }
-                        if (conn.responseCode == 200 && startByte > 0) { startByte = 0; tmpFile.delete() }
+                        // Server ignored the Range header and is sending the whole file again.
+                        if (conn.responseCode == 200 && startByte > 0) { startByte = 0; sink.discardPartial() }
+
+                        // THE SERVER decides how big the file is, not the catalog.
+                        // A hardcoded sizeBytes goes stale the moment upstream re-publishes a
+                        // model, and then a perfectly good download is judged "incomplete",
+                        // deleted, retried five times and reported as a failure. That is exactly
+                        // what happened to Gemma 4 E2B/E4B: the catalog was ~5MB short of the
+                        // real file, so the flagship model could never be installed. The catalog
+                        // size is now only an estimate for the UI and the free-space pre-check.
+                        val expectedTotal = when {
+                            conn.responseCode == 206 -> {
+                                // "Content-Range: bytes 100-999/1000" — the part after '/'.
+                                conn.getHeaderField("Content-Range")
+                                    ?.substringAfterLast('/', "")
+                                    ?.trim()?.toLongOrNull()
+                                    ?: (startByte + conn.contentLengthLong).takeIf { conn.contentLengthLong > 0 }
+                            }
+                            else -> conn.contentLengthLong.takeIf { it > 0 }
+                        } ?: catalogModel.sizeBytes
+                        if (expectedTotal > 0 && expectedTotal != catalogModel.sizeBytes) {
+                            addLog(LogLevel.INFO, TAG,
+                                "Catalog size for ${catalogModel.name} is stale " +
+                                    "(${catalogModel.sizeBytes}); server says $expectedTotal")
+                        }
 
                         conn.inputStream.use { input ->
-                            FileOutputStream(tmpFile, startByte > 0).use { output ->
+                            sink.openAt(startByte).use { output ->
                                 val buffer = ByteArray(8192)
                                 var received = startByte
                                 var lastUpdate = System.currentTimeMillis()
@@ -1174,22 +1716,35 @@ class ChatViewModel(
                                     received += n
                                     val now = System.currentTimeMillis()
                                     if (now - lastUpdate >= 300) {
-                                        val p = if (catalogModel.sizeBytes > 0) (received.toFloat() / catalogModel.sizeBytes).coerceIn(0f, 1f) else 0f
+                                        val p = if (expectedTotal > 0) (received.toFloat() / expectedTotal).coerceIn(0f, 1f) else 0f
                                         _uiState.update { it.copy(catalogDownloadProgress = it.catalogDownloadProgress + (catalogModel.id to p)) }
                                         lastUpdate = now
                                     }
                                 }
+                                output.flush()
                             }
                         }
                         conn.disconnect()
-                        tmpFile.renameTo(finalFile)
-                        addLog(LogLevel.INFO, TAG, "${catalogModel.name} downloaded!")
+
+                        // Integrity check: a stream that closes early (CDN hiccup) leaves a
+                        // truncated file. Never accept a size mismatch as a valid model —
+                        // resume on the next attempt, or fail & delete on the last.
+                        val written = sink.partialBytes()
+                        if (expectedTotal > 0 && written != expectedTotal) {
+                            addLog(LogLevel.WARNING, TAG, "Incomplete download ($written/$expectedTotal bytes)")
+                            if (attempt < maxRetries) { kotlinx.coroutines.delay(attempt * 2000L); continue }
+                            sink.discardPartial()
+                            throw Exception("Download incomplete: $written/$expectedTotal bytes")
+                        }
+
+                        if (!sink.finish()) throw Exception("Could not finalise the downloaded file")
+                        addLog(LogLevel.INFO, TAG, "${catalogModel.name} downloaded to ${sink.label}")
                         _uiState.update { it.copy(catalogDownloadProgress = it.catalogDownloadProgress - catalogModel.id) }
                         scanAvailableModels()
                         return@launch
 
                     } catch (e: Exception) {
-                        val saved = if (tmpFile.exists()) tmpFile.length() / (1024 * 1024) else 0
+                        val saved = sink.partialBytes() / (1024 * 1024)
                         addLog(LogLevel.WARNING, TAG, "Download attempt $attempt failed ($saved MB saved): ${e.message}")
                         if (attempt < maxRetries) {
                             kotlinx.coroutines.delay(attempt * 3000L)
@@ -1200,19 +1755,192 @@ class ChatViewModel(
                 }
             } catch (e: Exception) {
                 addLog(LogLevel.ERROR, TAG, "Download failed: ${e.message}")
-                _uiState.update { it.copy(catalogDownloadProgress = it.catalogDownloadProgress - catalogModel.id) }
+                _uiState.update {
+                    it.copy(
+                        catalogDownloadProgress = it.catalogDownloadProgress - catalogModel.id,
+                        downloadError = "Download failed for ${catalogModel.name}: ${e.message}"
+                    )
+                }
+            } finally {
+                // Release the foreground service if it was only kept alive for this download
+                // (offline engine init starts its own; this just covers the online/idle case).
+                if (_uiState.value.appMode is AppMode.Online || engine == null) {
+                    try { MedhaService.stop(application) } catch (_: Exception) {}
+                }
             }
         }
     }
 
-    fun isModelDownloaded(catalogModel: CatalogModel): Boolean {
-        return File(modelsDir(), catalogModel.fileName).exists()
+    fun clearDownloadError() {
+        _uiState.update { it.copy(downloadError = null) }
     }
 
+    // ── Shared model folder ─────────────────────────────────────────
+
+    /**
+     * Re-read the storage setting and whether All-files access is currently granted. Called on
+     * every scan and whenever the Settings screen resumes — the permission is toggled on a system
+     * screen, so there is no result to await, only a state to re-check.
+     */
+    fun refreshStorageState() {
+        val tree = ModelStorage.sharedTreeUri(application)
+        _uiState.update {
+            it.copy(
+                modelLocation = ModelStorage.location(application),
+                sharedFolderPath = tree?.let { u -> ExternalModelStore.folderLabel(u) } ?: "",
+                suggestedFolderPath = ModelStorage.suggestedPath(),
+                hasSharedStorageAccess = tree != null
+            )
+        }
+    }
+
+    /** The intent the Settings screen launches for the system folder picker. */
+    fun modelFolderPickerIntent() = ExternalModelStore.pickFolderIntent()
+
+    /**
+     * Remember the folder the user just granted. Existing models are never moved — MEDHA's own
+     * folder stays in the list, so this can't orphan a model that is already on disk.
+     */
+    fun setSharedModelFolder(treeUri: Uri) {
+        if (ModelStorage.setSharedTree(application, treeUri)) {
+            addLog(LogLevel.INFO, TAG, "Model folder set to ${ModelStorage.describe(application)}")
+        } else {
+            addLog(LogLevel.ERROR, TAG, "Could not keep access to that folder")
+            _uiState.update { it.copy(downloadError = "Could not keep access to that folder. Try picking it again.") }
+        }
+        refreshStorageState()
+        scanAvailableModels()
+    }
+
+    /**
+     * Add ONE model file the user picked, used in place rather than copied. The alternative,
+     * "Import", duplicates the weights — pointless for a 2.4 GB file that is already on the device.
+     */
+    fun addSharedModelFile(uri: Uri) {
+        if (ModelStorage.addSharedFile(application, uri)) {
+            addLog(LogLevel.INFO, TAG, "Added model file from ${uri.lastPathSegment}")
+        } else {
+            addLog(LogLevel.ERROR, TAG, "Could not keep access to that file")
+            _uiState.update { it.copy(downloadError = "Could not keep access to that file. Try picking it again.") }
+        }
+        refreshStorageState()
+        scanAvailableModels()
+    }
+
+    /**
+     * Copy a shared-folder model into MEDHA's own storage so the engine can open it by real path.
+     *
+     * Unavoidable: LiteRT-LM opens the model path in native code, and neither a `content://` URI
+     * nor a `/proc/self/fd` alias survives that (the alias re-opens the file and fails a fresh
+     * permission check). Reading through SAF to make the copy is fine — it is only the loader's
+     * re-open that is refused.
+     */
+    fun copySharedModelIn(model: ModelInfo) {
+        if (!model.isShared) return
+        val key = model.fileName
+        if (_uiState.value.modelCopyProgress.containsKey(key)) return
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val needed = ExternalModelStore.sizeOf(application, model.filePath)
+            val destDir = ModelStorage.appRoot(application)
+            val free = runCatching { destDir.usableSpace }.getOrDefault(-1L)
+            val headroom = 50L * 1024 * 1024
+            if (needed > 0 && free in 0 until (needed + headroom)) {
+                val needMb = needed / (1024 * 1024)
+                val freeMb = free / (1024 * 1024)
+                addLog(LogLevel.ERROR, TAG, "Not enough storage to copy ${model.fileName}: need ~${needMb}MB, have ${freeMb}MB")
+                _uiState.update {
+                    it.copy(downloadError = "Not enough space to copy ${model.displayName} — needs ~${needMb}MB, ${freeMb}MB free.")
+                }
+                return@launch
+            }
+
+            addLog(LogLevel.INFO, TAG, "Copying ${model.fileName} into app storage (${needed / (1024 * 1024)}MB)...")
+            _uiState.update { it.copy(modelCopyProgress = it.modelCopyProgress + (key to 0f)) }
+
+            // Name it exactly as in the shared folder, minus any "subfolder/" prefix the scan
+            // added for display, so the catalog can still match it by file name.
+            val destName = model.fileName.substringAfterLast('/')
+            val dest = File(destDir, destName)
+            val ok = ExternalModelStore.copyIn(application, model.filePath, dest) { p ->
+                _uiState.update { it.copy(modelCopyProgress = it.modelCopyProgress + (key to p)) }
+            }
+
+            _uiState.update { it.copy(modelCopyProgress = it.modelCopyProgress - key) }
+            if (!ok) {
+                addLog(LogLevel.ERROR, TAG, "Copy failed for ${model.fileName}")
+                _uiState.update { it.copy(downloadError = "Could not copy ${model.displayName} into MEDHA.") }
+                return@launch
+            }
+
+            addLog(LogLevel.INFO, TAG, "${model.displayName} copied — loading")
+            scanModelsNow()
+            val local = _uiState.value.availableModels.firstOrNull {
+                !it.isShared && it.fileName.equals(destName, ignoreCase = true)
+            }
+            if (local != null) {
+                cancelActiveGeneration()
+                destroyEngine()
+                _uiState.update { it.copy(selectedModel = local, modelStatus = ModelStatus.Initializing) }
+                initializeEngine()
+            }
+        }
+    }
+
+    /** Forget the shared folder and fall back to MEDHA's own models. */
+    fun clearSharedModelFolder() {
+        val active = _uiState.value.selectedModel
+        ModelStorage.clearSharedTree(application)
+        addLog(LogLevel.INFO, TAG, "Shared model folder removed")
+        // Loading a model out of a folder we no longer have is impossible — drop the engine
+        // rather than leave a Ready status pointing at an unreachable file.
+        if (active?.isShared == true) {
+            viewModelScope.launch(Dispatchers.IO) {
+                cancelActiveGeneration()
+                destroyEngine()
+                _uiState.update { it.copy(selectedModel = null, modelStatus = ModelStatus.ModelNotFound) }
+                refreshStorageState()
+                scanAvailableModels()
+            }
+        } else {
+            refreshStorageState()
+            scanAvailableModels()
+        }
+    }
+
+    /**
+     * Delete only *orphan* *.medhatmp partials — ones whose base file name has no catalog
+     * entry, so they can never be resumed through the UI. Catalog-matching partials are kept
+     * so an interrupted download can still resume. Safe to call on startup.
+     */
+    private fun sweepTempDownloads() {
+        try {
+            modelsDir().listFiles { f -> f.name.endsWith(TMP_EXT) }?.forEach { stale ->
+                val baseName = stale.name.removeSuffix(TMP_EXT)
+                if (ModelCatalog.findByFileName(baseName) == null) stale.delete()
+            }
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * A catalog model counts as present if MEDHA downloaded it OR the shared folder already has
+     * it — the whole point of the shared folder is that a model another app fetched is not
+     * fetched again. The shared side is read from the last scan rather than re-queried, so this
+     * stays cheap enough to call from the catalog list.
+     */
+    private fun findAvailable(fileName: String): ModelInfo? {
+        val local = File(modelsDir(), fileName)
+        if (local.isFile && local.length() > 0) {
+            return ModelInfo.fromFileName(local.name, local.absolutePath, local.length())
+        }
+        return _uiState.value.availableModels.firstOrNull { it.fileName.equals(fileName, true) }
+    }
+
+    fun isModelDownloaded(catalogModel: CatalogModel): Boolean =
+        findAvailable(catalogModel.fileName) != null
+
     fun activateCatalogModel(catalogModel: CatalogModel) {
-        val file = File(modelsDir(), catalogModel.fileName)
-        if (!file.exists()) return
-        val info = ModelInfo.fromFileName(file.name, file.absolutePath, file.length())
+        val info = findAvailable(catalogModel.fileName) ?: return
         // Refresh available models list and force engine reload
         scanAvailableModels()
         _uiState.update { it.copy(selectedModel = info, modelStatus = ModelStatus.Initializing) }
@@ -1521,11 +2249,19 @@ class ChatViewModel(
         maxTokens = newMaxTokens
         enableThinking = thinking
         outputLanguage = language
-        _uiState.update { it.copy(showConfigDialog = false) }
+        // useGpu used to be logged and thrown away, so the GPU/CPU chips did nothing at all.
+        // Now it is persisted and drives the backend choice on the next load. Choosing GPU
+        // explicitly also forgives a previously recorded GPU crash — the user is asking to retry.
+        if (useGpu) enginePrefs.clearGpuCrash()
+        enginePrefs.preferGpu = useGpu
+        _uiState.update { it.copy(showConfigDialog = false, preferGpu = useGpu) }
         addLog(LogLevel.INFO, TAG, "Config updated: topK=$topK topP=$topP temp=$temperature maxTokens=$maxTokens gpu=$useGpu thinking=$thinking lang=$language")
-        // Reinitialize engine with new config
-        destroyEngine()
-        initializeEngine()
+        // Reinitialize engine with new config (after any in-flight generation has stopped)
+        viewModelScope.launch(Dispatchers.IO) {
+            cancelActiveGeneration()
+            destroyEngine()
+            initializeEngine()
+        }
     }
     fun hidePromptTemplates() { _uiState.update { it.copy(showPromptTemplates = false) } }
 
@@ -1568,6 +2304,7 @@ class ChatViewModel(
 
     fun loadChatSession(sessionId: String) {
         viewModelScope.launch(Dispatchers.IO) {
+            cancelActiveGeneration()
             val entities = chatDb.chatDao().getMessages(sessionId)
             val messages = entities.map { e ->
                 Message(
@@ -1588,6 +2325,7 @@ class ChatViewModel(
 
     fun deleteChatSession(sessionId: String) {
         viewModelScope.launch(Dispatchers.IO) {
+            if (currentSessionId == sessionId) cancelActiveGeneration()
             chatDb.chatDao().deleteSession(sessionId)
             if (currentSessionId == sessionId) {
                 currentSessionId = java.util.UUID.randomUUID().toString()
@@ -1598,6 +2336,7 @@ class ChatViewModel(
 
     fun deleteAllChatSessions() {
         viewModelScope.launch(Dispatchers.IO) {
+            cancelActiveGeneration()
             chatDb.chatDao().deleteAllSessions()
             currentSessionId = java.util.UUID.randomUUID().toString()
             _uiState.update { it.copy(messages = emptyList()) }
@@ -1605,11 +2344,14 @@ class ChatViewModel(
     }
 
     fun startNewChat() {
-        saveCurrentChatSession()
-        currentSessionId = java.util.UUID.randomUUID().toString()
-        _uiState.update { it.copy(messages = emptyList(), activeGrandMaster = null, activeCustomGrandMaster = null, streamingText = "", streamingThinking = "") }
-        if (_uiState.value.appMode is AppMode.Offline) resetConversation()
-        addLog(LogLevel.INFO, TAG, "New chat started")
+        viewModelScope.launch(Dispatchers.IO) {
+            cancelActiveGeneration()
+            saveCurrentChatSession()
+            currentSessionId = java.util.UUID.randomUUID().toString()
+            _uiState.update { it.copy(messages = emptyList(), activeGrandMaster = null, activeCustomGrandMaster = null, streamingText = "", streamingThinking = "") }
+            if (_uiState.value.appMode is AppMode.Offline) resetConversation()
+            addLog(LogLevel.INFO, TAG, "New chat started")
+        }
     }
 
     // ── Helpers ──────────────────────────────────────────────────────
@@ -1672,20 +2414,17 @@ class ChatViewModel(
             val ext = if (image.mimeType.contains("png")) "png" else "jpg"
             val fileName = "MEDHA_${System.currentTimeMillis()}.$ext"
             val format = if (ext == "png") Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
+            // minSdk is 31, so scoped storage (RELATIVE_PATH + IS_PENDING) always applies.
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
                 put(MediaStore.Images.Media.MIME_TYPE, image.mimeType)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/MEDHA")
-                    put(MediaStore.Images.Media.IS_PENDING, 1)
-                }
+                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/MEDHA")
+                put(MediaStore.Images.Media.IS_PENDING, 1)
             }
             val uri = application.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return null
             application.contentResolver.openOutputStream(uri)?.use { bitmap.compress(format, 95, it) }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                values.clear(); values.put(MediaStore.Images.Media.IS_PENDING, 0)
-                application.contentResolver.update(uri, values, null, null)
-            }
+            values.clear(); values.put(MediaStore.Images.Media.IS_PENDING, 0)
+            application.contentResolver.update(uri, values, null, null)
             uri.toString()
         } catch (e: Exception) { null }
     }

@@ -1,5 +1,6 @@
 package com.ashes.dev.works.ai.neural.brain.medha.domain.model
 
+import com.ashes.dev.works.ai.neural.brain.medha.data.local.ModelLocation
 import com.ashes.dev.works.ai.neural.brain.medha.data.remote.GeminiModelInfo
 
 data class ChatState(
@@ -35,6 +36,24 @@ data class ChatState(
     val isThinking: Boolean = false,
     // Model catalog download progress (modelId -> progress 0-1)
     val catalogDownloadProgress: Map<String, Float> = emptyMap(),
+    // One-shot user-facing download error (storage full, incomplete, etc.); null = none.
+    val downloadError: String? = null,
+    // Shared model folder (/sdcard/AIModels) — one copy of the weights across the user's apps.
+    val modelLocation: ModelLocation = ModelLocation.App,
+    // Display name of the granted folder (e.g. "AIModels"); blank when none is picked.
+    val sharedFolderPath: String = "",
+    // /sdcard/AIModels — shown as a hint so the user points the picker where Koeyomi downloads.
+    val suggestedFolderPath: String = "",
+    val hasSharedStorageAccess: Boolean = false,
+    // Prefer the GPU for inference. Drives the GPU/CPU chips in the Configurations dialog, which
+    // until now were purely decorative.
+    val preferGpu: Boolean = true,
+    // Largest context this device can afford right now. The token slider cannot exceed it, so
+    // the Configurations dialog shows it rather than silently ignoring a higher setting.
+    val deviceContextCap: Int = 0,
+    // Copying a shared-folder model into app storage (fileName -> 0..1). The native loader
+    // cannot open a SAF document, so a shared model has to be copied in before it can run.
+    val modelCopyProgress: Map<String, Float> = emptyMap(),
     // Grand Master mode
     val activeGrandMaster: GrandMaster? = null,
     val activeCustomGrandMaster: CustomGrandMaster? = null,
@@ -50,7 +69,13 @@ data class ChatState(
     // encoder. False when the model claims support but the runtime fell back to
     // text-only (e.g. an incompatible vision encoder). Defaults true until proven otherwise.
     val offlineVisionAvailable: Boolean = true,
-    val offlineAudioAvailable: Boolean = true
+    val offlineAudioAvailable: Boolean = true,
+    // Token context window the offline engine actually allocated (maxNumTokens).
+    // 0 = unknown / not an offline model. Used to show the context length in chat.
+    val offlineContextLength: Int = 0,
+    // Whether the loaded offline engine has Multi-Token Prediction (speculative
+    // decoding) active — only true for MTP model builds that pass the capability probe.
+    val offlineMtpActive: Boolean = false
 ) {
     val hasAnyValidatedKey: Boolean get() = apiKeys.any { it.isValidated && it.isEnabled }
     val validatedKeys: List<ApiKeyEntry> get() = apiKeys.filter { it.isValidated && it.isEnabled }

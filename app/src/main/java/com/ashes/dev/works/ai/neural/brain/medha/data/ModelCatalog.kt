@@ -18,10 +18,16 @@ data class CatalogModel(
     val defaultTopP: Double = 0.95,
     val defaultTemperature: Double = 1.0,
     val accelerators: List<String> = listOf("cpu"),
-    val taskTypes: List<String> = listOf("llm_chat")
+    val taskTypes: List<String> = listOf("llm_chat"),
+    // Remote file name on Hugging Face, when it differs from the local [fileName]
+    // (e.g. a repo that ships a generic "model.litertlm"). Defaults to [fileName].
+    val remoteFileName: String? = null,
+    // Multi-Token Prediction build: the .litertlm bundles an MTP drafter, so the
+    // engine can use speculative decoding for faster generation. Experimental.
+    val usesMtp: Boolean = false
 ) {
     val downloadUrl: String
-        get() = "https://huggingface.co/$huggingFaceRepo/resolve/main/$fileName?download=true"
+        get() = "https://huggingface.co/$huggingFaceRepo/resolve/main/${remoteFileName ?: fileName}?download=true"
     val learnMoreUrl: String
         get() = "https://huggingface.co/$huggingFaceRepo"
     val sizeLabel: String get() {
@@ -29,6 +35,7 @@ data class CatalogModel(
         return if (mb >= 1024) "%.1f GB".format(mb / 1024.0) else "%.0f MB".format(mb)
     }
     val featureTags: List<String> get() = buildList {
+        if (usesMtp) add("MTP")
         if (supportsThinking) add("Thinking")
         if (supportsImage) add("Vision")
         if (supportsAudio) add("Audio")
@@ -42,7 +49,10 @@ object ModelCatalog {
         CatalogModel(
             id = "gemma-4-e2b", name = "Gemma 4 E2B",
             description = "Google's latest. Vision, audio, thinking. 140+ languages. Best all-rounder.",
-            sizeBytes = 2_583_085_056L, fileName = "gemma-4-E2B-it.litertlm",
+            // Verified against the Hugging Face Content-Length on 2026-08-12. The download
+            // integrity check no longer trusts this number (the server's is authoritative);
+            // it is an estimate for the size label and the free-space pre-check.
+            sizeBytes = 2_588_147_712L, fileName = "gemma-4-E2B-it.litertlm",
             huggingFaceRepo = "litert-community/gemma-4-E2B-it-litert-lm",
             supportsImage = true, supportsAudio = true, supportsThinking = true,
             maxContext = 32768, minRamGb = 8, badge = "BEST",
@@ -52,12 +62,24 @@ object ModelCatalog {
         CatalogModel(
             id = "gemma-4-e4b", name = "Gemma 4 E4B",
             description = "Larger Gemma 4. 140+ languages. Smarter but needs 12GB RAM.",
-            sizeBytes = 3_654_467_584L, fileName = "gemma-4-E4B-it.litertlm",
+            sizeBytes = 3_659_530_240L, fileName = "gemma-4-E4B-it.litertlm",
             huggingFaceRepo = "litert-community/gemma-4-E4B-it-litert-lm",
             supportsImage = true, supportsAudio = true, supportsThinking = true,
             maxContext = 32768, minRamGb = 12, badge = "PRO",
             accelerators = listOf("cpu", "gpu"),
             taskTypes = listOf("llm_chat", "llm_prompt_lab", "llm_ask_image")
+        ),
+        CatalogModel(
+            id = "gemma-4-e2b-mtp", name = "Gemma 4 E2B MTP",
+            description = "Experimental. Multi-token prediction (speculative decoding) for faster generation. Community build, text only.",
+            sizeBytes = 2_584_805_376L,
+            fileName = "gemma-4-E2B-it-128k-mtp.litertlm",
+            remoteFileName = "model.litertlm",
+            huggingFaceRepo = "metricspace/gemma4-E2B-it-litert-128k-mtp",
+            supportsThinking = true, usesMtp = true,
+            maxContext = 8192, minRamGb = 8, badge = "MTP",
+            accelerators = listOf("cpu", "gpu"),
+            taskTypes = listOf("llm_chat", "llm_prompt_lab")
         ),
         CatalogModel(
             id = "gemma-3n-e2b", name = "Gemma 3n E2B",
