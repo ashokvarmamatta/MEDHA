@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ContentCopy
+import com.ashes.dev.works.ai.neural.brain.medha.ui.icons.MedhaIcons
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -518,7 +518,7 @@ private fun CodeBlockView(block: MdBlock.CodeBlock, onCopyCode: ((String) -> Uni
                     }
                 ) {
                     Icon(
-                        imageVector = Icons.Default.ContentCopy,
+                        imageVector = MedhaIcons.ContentCopy,
                         contentDescription = "Copy code",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )

@@ -18,6 +18,10 @@ data class ChatState(
     val streamingText: String = "",
     val streamingThinking: String = "",
     val isThinking: Boolean = false,
+    // Live decode stats, updated as tokens arrive — the same numbers the finished message
+    // shows, but visible while you are waiting rather than only afterwards.
+    val streamingTokenCount: Int = 0,
+    val streamingTokensPerSec: Float = 0f,
     // Model catalog download progress (modelId -> progress 0-1)
     val catalogDownloadProgress: Map<String, Float> = emptyMap(),
     // One-shot user-facing download error (storage full, incomplete, etc.); null = none.

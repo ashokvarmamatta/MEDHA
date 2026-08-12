@@ -696,7 +696,9 @@ class ChatViewModel(
 
         _uiState.update {
             it.copy(isGenerating = true, messages = it.messages + userMessage,
-                pendingImageUri = null, streamingText = "", streamingThinking = "", isThinking = false)
+                pendingImageUri = null, streamingText = "", streamingThinking = "", isThinking = false,
+                // Zero the live counters so the previous turn's rate isn't shown during prefill.
+                streamingTokenCount = 0, streamingTokensPerSec = 0f)
         }
         addLog(LogLevel.DEBUG, TAG, "User: ${displayText.take(80)}${if (imageUri != null) " [+image]" else ""}")
 
@@ -840,7 +842,19 @@ class ChatViewModel(
                                 if (tokenCount == 0) firstTokenTime = System.currentTimeMillis()
                                 tokenCount++
                                 fullResponse.append(text)
-                                _uiState.update { it.copy(streamingText = fullResponse.toString(), isThinking = false) }
+                                // Live decode rate. Measured from the FIRST token, not from the
+                                // request, so the prefill wait doesn't drag the figure down and
+                                // it matches the tok/s reported on the finished message.
+                                val sinceFirst = System.currentTimeMillis() - firstTokenTime
+                                val liveTps = if (sinceFirst > 0) (tokenCount * 1000f) / sinceFirst else 0f
+                                _uiState.update {
+                                    it.copy(
+                                        streamingText = fullResponse.toString(),
+                                        isThinking = false,
+                                        streamingTokenCount = tokenCount,
+                                        streamingTokensPerSec = liveTps
+                                    )
+                                }
                             }
                             if (!thought.isNullOrEmpty()) {
                                 fullThinking.append(thought)

@@ -15,17 +15,9 @@
 -keepattributes RuntimeVisibleAnnotations,RuntimeVisibleParameterAnnotations
 -keepattributes AnnotationDefault
 
-# ---------------------------------------------------------------------------
-# Strip logging from release builds.
-# addLog() mirrors user prompts into Log.d/Log.i ("User: <prompt>"), so shipping
-# these calls would leak user content into logcat (role 22 — no PII in logs).
-# Log.e/Log.w are kept so crash triage still has something to work with.
-# ---------------------------------------------------------------------------
--assumenosideeffects class android.util.Log {
-    public static int d(...);
-    public static int v(...);
-    public static int i(...);
-}
+# NOTE: log stripping lives in proguard-rules-release.pro, NOT here. This file is applied to
+# the minified DEBUG build too, and removing Log.d/Log.i there would delete the engine
+# diagnostics (model load, context budget, backend fallbacks) that on-device debugging depends on.
 
 # ---------------------------------------------------------------------------
 # Domain models

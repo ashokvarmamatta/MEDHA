@@ -67,7 +67,7 @@ import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.filled.Folder
+import com.ashes.dev.works.ai.neural.brain.medha.ui.icons.MedhaIcons
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -517,7 +517,7 @@ private fun SharedModelFolderCard(
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    Icons.Default.Folder,
+                    MedhaIcons.Folder,
                     contentDescription = null,
                     tint = if (picked) AccentCyan else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
                     modifier = Modifier.size(20.dp)

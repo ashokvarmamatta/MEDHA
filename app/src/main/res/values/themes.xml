@@ -1,6 +1,26 @@
 <resources>
-    <style name="Theme.MEDHA" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    <!--
+      Platform DayNight theme, NOT Theme.MaterialComponents.
+
+      This parent was the ONLY reason MEDHA depended on com.google.android.material, and that one
+      line pulled in ~1,100 classes of the old View system — Material Components itself plus
+      appcompat, fragment, recyclerview and constraintlayout/motion. The app is 100 % Compose on a
+      ComponentActivity and does not instantiate a single View, so none of it was ever used.
+
+      android:Theme.DeviceDefault.DayNight.NoActionBar keeps the same behaviour (light/dark follows
+      the system, matching isSystemInDarkTheme() in the Compose theme) with no library at all.
+      The XML theme only governs the window before Compose draws; everything after is Material 3.
+    -->
+    <!-- NOTE: the platform has Theme.DeviceDefault.DayNight and Theme.DeviceDefault.NoActionBar,
+         but no combined DayNight.NoActionBar — asking for one fails AAPT resource linking. Take
+         the DayNight parent and switch the action bar off explicitly. -->
+    <style name="Theme.MEDHA" parent="android:Theme.DeviceDefault.DayNight">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
+        <!-- Matches the Compose surface so the cold-start window doesn't flash a pale
+             DeviceDefault background before the first frame. -->
+        <item name="android:windowBackground">@color/medha_window_background</item>
     </style>
 </resources>

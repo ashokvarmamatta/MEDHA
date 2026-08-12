@@ -53,13 +53,12 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.ContentCopy
+import com.ashes.dev.works.ai.neural.brain.medha.ui.icons.MedhaIcons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -101,6 +100,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.material3.SmallFloatingActionButton
 import kotlinx.coroutines.launch
@@ -147,6 +147,13 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/**
+ * Scroll offset meaning "as far into this item as it goes". LazyColumn clamps it to the real
+ * end of the content, which is how we land on the newest token instead of the item's first
+ * line. Deliberately not Int.MAX_VALUE — that overflows internal offset arithmetic.
+ */
+private const val SCROLL_TO_END_OFFSET = 1_000_000
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
@@ -185,14 +192,57 @@ fun ChatScreen(
     val scope = rememberCoroutineScope()
     val screenContext = LocalContext.current
 
-    // Auto-scroll to follow new messages AND streaming tokens — but only when the user is
-    // already near the bottom, so scrolling up to read history isn't interrupted.
-    LaunchedEffect(uiState.messages.size, uiState.streamingText.length, uiState.streamingThinking.length, uiState.isGenerating) {
+    // ── Follow-the-stream scrolling ────────────────────────────────────────────
+    //
+    // Scrolling must stay under the user's control. The previous version decided
+    // "am I near the bottom?" from the last VISIBLE ITEM INDEX and then called
+    // scrollToItem(lastIndex) — which fails twice over on a streaming reply:
+    //
+    //   1. A long answer is ONE list item, so the last visible index is that item no
+    //      matter where you are inside it. "Near bottom" was therefore always true,
+    //      even when the user had scrolled up to read.
+    //   2. scrollToItem(index) lands on that item's FIRST line, so every token yanked
+    //      the view back to the start of the response.
+    //
+    // Both are fixed by measuring in pixels rather than item indices: canScrollForward
+    // is false only when genuinely at the end of the content, and scrolling to a huge
+    // offset within the last item clamps to the true bottom instead of its top.
+
+    /** True while the view is pinned to the bottom; the stream is only followed then. */
+    var followStream by remember { mutableStateOf(true) }
+
+    // The user's own gestures decide whether to keep following.
+    //
+    // Following stops the INSTANT a touch starts, not when the gesture settles. Waiting for
+    // it to settle left followStream true for the whole drag, so every arriving token called
+    // scrollToItem and fought the finger — the list shoved itself back down while the user
+    // was trying to read upwards.
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
+            followStream = if (scrolling) false else !listState.canScrollForward
+        }
+    }
+
+    LaunchedEffect(
+        uiState.messages.size,
+        uiState.streamingText.length,
+        uiState.streamingThinking.length,
+        uiState.isGenerating
+    ) {
+        if (!followStream) return@LaunchedEffect
         val total = uiState.messages.size + if (uiState.isGenerating) 1 else 0
         if (total == 0) return@LaunchedEffect
-        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-        val nearBottom = lastVisible < 0 || lastVisible >= total - 2
-        if (nearBottom) listState.scrollToItem(total - 1)
+        // Large offset = "as far into this item as it goes"; LazyColumn clamps it to the
+        // real end, which is the newest token rather than the first line.
+        listState.scrollToItem(total - 1, SCROLL_TO_END_OFFSET)
+    }
+
+    // Sending a message returns to the bottom — that is an explicit request to see the
+    // answer. Keyed on the user's OWN turn only: keying on messages.size alone also fired
+    // when the finished reply was appended, dragging the user down at the end of a response
+    // they had deliberately scrolled up to read.
+    LaunchedEffect(uiState.messages.size) {
+        if (uiState.messages.lastOrNull()?.user is User.Person) followStream = true
     }
 
     // Surface download errors (storage full, incomplete, etc.) as a toast.
@@ -442,19 +492,28 @@ fun ChatScreen(
                     if (uiState.isGenerating) {
                         // Show streaming response in real-time
                         if (uiState.streamingText.isNotEmpty() || uiState.streamingThinking.isNotEmpty()) {
-                            item { StreamingBubble(streamingText = uiState.streamingText, thinkingText = uiState.streamingThinking, isThinking = uiState.isThinking) }
+                            item {
+                                StreamingBubble(
+                                    streamingText = uiState.streamingText,
+                                    thinkingText = uiState.streamingThinking,
+                                    isThinking = uiState.isThinking,
+                                    tokenCount = uiState.streamingTokenCount,
+                                    tokensPerSec = uiState.streamingTokensPerSec
+                                )
+                            }
                         } else {
                             item { TypingIndicator() }
                         }
                     }
                 }
 
-                // Scroll-to-bottom button when the user has scrolled up
+                // Scroll-to-bottom button. Index-based detection missed the common case —
+                // scrolled up INSIDE one long streaming answer, where the last visible item
+                // is still the last item — so this asks whether there is any content left
+                // below instead.
                 val showScrollDown by remember {
                     derivedStateOf {
-                        val info = listState.layoutInfo
-                        val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
-                        info.totalItemsCount > 0 && last < info.totalItemsCount - 2
+                        listState.layoutInfo.totalItemsCount > 0 && listState.canScrollForward
                     }
                 }
                 androidx.compose.animation.AnimatedVisibility(
@@ -463,7 +522,16 @@ fun ChatScreen(
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp)
                 ) {
                     SmallFloatingActionButton(
-                        onClick = { scope.launch { listState.animateScrollToItem((listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)) } },
+                        onClick = {
+                            // Jump to the newest token and resume following the stream.
+                            followStream = true
+                            scope.launch {
+                                listState.animateScrollToItem(
+                                    (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0),
+                                    SCROLL_TO_END_OFFSET
+                                )
+                            }
+                        },
                         containerColor = MaterialTheme.colorScheme.secondaryContainer,
                         contentColor = MaterialTheme.colorScheme.onSecondaryContainer
                     ) {
@@ -926,7 +994,7 @@ private fun MessageBubble(message: Message, viewModel: ChatViewModel, aiName: St
                             },
                             modifier = Modifier.size(48.dp)
                         ) {
-                            Icon(Icons.Default.ContentCopy, "Copy message", modifier = Modifier.size(16.dp), tint = textColor.copy(alpha = 0.6f))
+                            Icon(MedhaIcons.ContentCopy, "Copy message", modifier = Modifier.size(16.dp), tint = textColor.copy(alpha = 0.6f))
                         }
                         if (isLast) {
                             IconButton(
@@ -1340,7 +1408,13 @@ private fun ChatHistorySheet(
 }
 
 @Composable
-private fun StreamingBubble(streamingText: String, thinkingText: String, isThinking: Boolean) {
+private fun StreamingBubble(
+    streamingText: String,
+    thinkingText: String,
+    isThinking: Boolean,
+    tokenCount: Int,
+    tokensPerSec: Float
+) {
     val textColor = MaterialTheme.colorScheme.onSecondaryContainer
 
     Column(
@@ -1386,6 +1460,22 @@ private fun StreamingBubble(streamingText: String, thinkingText: String, isThink
             Column(modifier = Modifier.padding(14.dp)) {
                 if (streamingText.isNotEmpty()) {
                     MarkdownText(markdown = streamingText, color = textColor, baseStyle = MaterialTheme.typography.bodyLarge)
+                    // Live decode rate while the answer is still arriving. The finished message
+                    // shows the same figures; there is no reason to make the user wait for them.
+                    if (tokenCount > 0) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(10.dp), color = AccentCyan, strokeWidth = 1.dp)
+                            Text(
+                                "$tokenCount tokens · ${"%.1f".format(tokensPerSec)} tok/s",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                color = textColor.copy(alpha = 0.5f)
+                            )
+                        }
+                    }
                 } else {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(modifier = Modifier.size(14.dp), color = AccentCyan, strokeWidth = 1.5.dp)
@@ -1494,7 +1584,7 @@ private fun ChatInputBar(
                         ),
                         modifier = Modifier.size(48.dp).clip(CircleShape)
                     ) {
-                        Icon(Icons.Filled.Stop, "Stop", modifier = Modifier.size(22.dp))
+                        Icon(MedhaIcons.Stop, "Stop", modifier = Modifier.size(22.dp))
                     }
                 } else {
                     IconButton(
