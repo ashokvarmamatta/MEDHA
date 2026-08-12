@@ -2,9 +2,9 @@
 
 # 🧠 MEDHA
 
-### On-Device AI with Gemma 4 — Vision, Audio, Thinking. Nothing leaves your phone.
+### On-Device AI — Gemma, Qwen, LFM2.5, SmolLM & more. Nothing leaves your phone.
 
-<img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&weight=500&size=18&pause=1000&color=00D4AA&center=true&vCenter=true&width=550&lines=Gemma+4+running+on+your+phone;Vision+%E2%80%94+analyze+images+offline;Thinking+mode+%E2%80%94+chain+of+thought;140%2B+languages+supported;Pick+output+language+%E2%80%94+45%2B+options;No+account%2C+no+API+key%2C+no+cloud;100%25+private+%E2%80%94+by+construction" />
+<img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&weight=500&size=18&pause=1000&color=00D4AA&center=true&vCenter=true&width=550&lines=Run+LLMs+on+your+phone;Gemma+4+%C2%B7+Qwen3+%C2%B7+LFM2.5+%C2%B7+SmolLM;Vision+%E2%80%94+analyze+images+offline;Thinking+mode+%E2%80%94+chain+of+thought;140%2B+languages+supported;Pick+output+language+%E2%80%94+45%2B+options;No+account%2C+no+API+key%2C+no+cloud;100%25+private+%E2%80%94+by+construction" />
 
 <br/>
 
@@ -24,7 +24,7 @@
 > **Can you run a real AI model — with vision and thinking — entirely on your phone?**
 > Yes. MEDHA does exactly that.
 
-Most AI apps are just API wrappers — they send your data to a cloud server and charge you for it. MEDHA takes a different approach. It runs Google's Gemma 4 model **directly on your Android phone** using the LiteRT LM SDK.
+Most AI apps are just API wrappers — they send your data to a cloud server and charge you for it. MEDHA takes a different approach. It runs open language models **directly on your Android phone** using Google's LiteRT LM SDK — Gemma, Qwen, LFM2.5, SmolLM, DeepSeek and anything else published as `.litertlm`.
 
 **There is no cloud path at all.** No accounts, no API keys, no inference endpoint. The only network request the app can make is downloading a model file from Hugging Face — after that you can turn the radio off for good. Privacy here is a property of the architecture, not a promise in a settings screen.
 
@@ -34,13 +34,13 @@ Most AI apps are just API wrappers — they send your data to a cloud server and
 
 ## 📱 What is MEDHA?
 
-**MEDHA** (Mobile Edge Device Hybrid AI) is an Android AI chat app that runs Gemma 4 on your phone. Ask it questions, analyze images, process audio — all without internet.
+**MEDHA** (Mobile Edge Device Hybrid AI) is an Android AI chat app that runs open LLMs on your phone — Gemma 4, Qwen3, LFM2.5, SmolLM2, DeepSeek R1 and more. Ask it questions, analyze images, process audio — all without internet.
 
 ```
 📱 You type / attach an image
     │
     ▼
-🧠 Gemma 4 — LiteRT LM, on your phone
+🧠 Your chosen model — LiteRT LM, on your phone
     ├── Text     : CPU (GPU opt-in)
     ├── Vision   : GPU, with CPU fallback
     └── Thinking : chain-of-thought, streamed
@@ -67,11 +67,11 @@ Most AI apps are just API wrappers — they send your data to a cloud server and
 
 ---
 
-## 🧠 On-Device AI (Gemma 4 + LiteRT LM) ![](https://img.shields.io/badge/%E2%9C%85_Stable-4CAF50?style=flat-square) ![](https://img.shields.io/badge/5_Models-7F52FF?style=flat-square)
+## 🧠 On-Device AI (LiteRT LM) ![](https://img.shields.io/badge/%E2%9C%85_Stable-4CAF50?style=flat-square) ![](https://img.shields.io/badge/9_Models-7F52FF?style=flat-square)
 
 | Feature | What it does |
 |---------|-------------|
-| 🔥 **Gemma 4 E2B / E4B** | Google's latest on-device model — vision, audio, thinking |
+| 🔥 **9 models, one tap** | Gemma 4 · Gemma 3 · Qwen3 · LFM2.5 · SmolLM2 · DeepSeek R1 — 270 MB to 3.7 GB |
 | 👁️ **On-Device Vision** | Analyze images, OCR, describe art — GPU vision encoder with CPU fallback |
 | 🎤 **Audio Input** | Process audio files on-device with audio-capable models |
 | 💭 **Thinking Mode** | Chain-of-thought reasoning — watch the model think in real-time |
@@ -81,15 +81,25 @@ Most AI apps are just API wrappers — they send your data to a cloud server and
 | 📊 **Token Stats** | Tokens, tok/s, latency, TTFT on every response |
 | 🎛️ **Load / Unload** | Release the model's memory without killing the app |
 
-### 📦 Model Catalog ![](https://img.shields.io/badge/5_Models-7F52FF?style=flat-square) ![](https://img.shields.io/badge/Free-4CAF50?style=flat-square)
+### 📦 Model Catalog ![](https://img.shields.io/badge/9_Models-7F52FF?style=flat-square) ![](https://img.shields.io/badge/Free-4CAF50?style=flat-square)
 
 | Model | Size | Capabilities | Best For |
 |-------|------|-------------|----------|
 | 🥇 **Gemma 4 E2B** | 2.6 GB | Text + Vision + Audio + Thinking + 140 languages | Most phones (8GB+ RAM) |
 | 🥈 **Gemma 4 E4B** | 3.7 GB | Text + Vision + Audio + Thinking + 140 languages | Flagship phones (12GB+ RAM) |
+| 🧬 **Gemma 4 E2B MTP** | 2.6 GB | Text + Thinking, speculative decoding | Experimental, faster decode |
 | 🥉 **Gemma 3n E2B** | 3.7 GB | Text + Vision + Audio | Previous gen, still solid |
+| 🧠 **Qwen3 1.7B** | 977 MB | Text + Thinking, strong multilingual | Balanced quality/size |
+| 💧 **LFM2.5 1.2B** | 736 MB | Text, hybrid architecture | Fast on mid-range |
 | 🪶 **Gemma 3 1B** | 584 MB | Text only | Low-end phones (6GB RAM) |
+| 🐣 **SmolLM2 360M** | 374 MB | Text only | Runs on almost anything |
+| 🐜 **Gemma 3 270M** | 304 MB | Text only | Very low-RAM phones |
 | 🧪 **DeepSeek R1 1.5B** | 1.8 GB | Text + Reasoning | Reasoning tasks |
+
+> **Only `.litertlm` / `.task` builds work.** LiteRT LM opens the model in native code, so GGUF
+> (llama.cpp), ONNX and MLX files cannot be loaded — they download fine and then fail with
+> `Unsupported or unknown file format`. [litert-community](https://huggingface.co/litert-community)
+> republishes many popular models in the right format.
 
 ---
 
@@ -186,7 +196,7 @@ A 2.4 GB model shouldn't be downloaded once per app. MEDHA can read models from 
 | 🗣️ Language | Kotlin 2.2 |
 | 🎨 UI | Jetpack Compose + Material 3 |
 | 🏛️ Architecture | MVVM — `ViewModel` + `StateFlow<ChatState>` |
-| 🧠 On-Device AI | LiteRT LM 0.16.0 (Gemma 4) |
+| 🧠 On-Device AI | LiteRT LM 0.16.0 — any `.litertlm` / `.task` model |
 | 💉 DI | Koin |
 | ⚡ Async | Kotlin Coroutines + Flow |
 | 🗄️ Storage | Room Database + DataStore Preferences |

@@ -108,6 +108,60 @@ object ModelCatalog {
             maxContext = 4096, minRamGb = 6,
             accelerators = listOf("cpu"),
             taskTypes = listOf("llm_chat", "llm_prompt_lab")
+        ),
+
+        // ── Non-Gemma families ──────────────────────────────────────────────
+        //
+        // Every entry MUST be a .litertlm or .task build. LiteRT-LM opens the model in native
+        // code and rejects anything else — a GGUF (llama.cpp) or ONNX file downloads fine and
+        // then fails with "INVALID_ARGUMENT: Unsupported or unknown file format", which looks
+        // like a corrupt download rather than a format mismatch. Liquid AI's own
+        // LiquidAI/LFM2.5-*-GGUF repos are NOT usable here; litert-community republishes the
+        // LiteRT builds below.
+        //
+        // sizeBytes is verified against the Hugging Face API (2026-08-12). It is only an
+        // estimate for the UI and the free-space pre-check — the download trusts the server's
+        // Content-Length, so a stale value here can no longer fail a good download.
+        CatalogModel(
+            id = "lfm2-5-1.2b", name = "LFM2.5 1.2B",
+            description = "Liquid AI's hybrid edge model. Fast, text only. Good quality for its size.",
+            sizeBytes = 736_015_744L,
+            fileName = "LFM2.5-1.2B-Instruct_int4.litertlm",
+            huggingFaceRepo = "litert-community/LFM2.5-1.2B-Instruct",
+            maxContext = 4096, minRamGb = 6, badge = "FAST",
+            accelerators = listOf("cpu"),
+            taskTypes = listOf("llm_chat", "llm_prompt_lab")
+        ),
+        CatalogModel(
+            id = "qwen3-1.7b", name = "Qwen3 1.7B",
+            description = "Alibaba's Qwen3. Strong multilingual and reasoning, text only.",
+            sizeBytes = 977_184_032L,
+            fileName = "Qwen3-1.7B_dynamic_wi4b32_afp32.litertlm",
+            huggingFaceRepo = "litert-community/Qwen3-1.7B",
+            supportsThinking = true,
+            maxContext = 4096, minRamGb = 6,
+            accelerators = listOf("cpu"),
+            taskTypes = listOf("llm_chat", "llm_prompt_lab")
+        ),
+        CatalogModel(
+            id = "smollm2-360m", name = "SmolLM2 360M",
+            description = "Extremely small and quick. Text only. Runs on almost anything.",
+            sizeBytes = 373_719_040L,
+            fileName = "SmolLM2_360M_instruct.litertlm",
+            huggingFaceRepo = "litert-community/SmolLM2-360M-Instruct",
+            maxContext = 2048, minRamGb = 4, badge = "TINY", defaultMaxTokens = 1024,
+            accelerators = listOf("cpu"),
+            taskTypes = listOf("llm_chat", "llm_prompt_lab")
+        ),
+        CatalogModel(
+            id = "gemma3-270m", name = "Gemma 3 270M",
+            description = "Smallest Gemma. Text only. For very low-RAM phones.",
+            sizeBytes = 304_005_120L,
+            fileName = "gemma3-270m-it-q8.litertlm",
+            huggingFaceRepo = "litert-community/gemma-3-270m-it",
+            maxContext = 2048, minRamGb = 4, badge = "TINY", defaultMaxTokens = 1024,
+            accelerators = listOf("cpu"),
+            taskTypes = listOf("llm_chat", "llm_prompt_lab")
         )
     )
 

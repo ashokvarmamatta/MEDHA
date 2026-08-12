@@ -21,3 +21,7 @@ local.properties
 /medha_test.png
 /medha_after_install.png
 /test screenshot/
+
+# AGP also drops a copy of the assembled APK here, outside /build — never commit binaries.
+/app/release/
+/app/debug/
