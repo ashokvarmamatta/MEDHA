@@ -122,10 +122,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.ashes.dev.works.ai.neural.brain.medha.domain.model.AppMode
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.ChatState
-import com.ashes.dev.works.ai.neural.brain.medha.domain.model.CustomGrandMaster
-import com.ashes.dev.works.ai.neural.brain.medha.domain.model.GrandMaster
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.Message
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.ModelStatus
 import com.ashes.dev.works.ai.neural.brain.medha.domain.model.PromptTemplate
@@ -167,16 +164,10 @@ fun ChatScreen(
     val listState = rememberLazyListState()
 
     // Back press handling: don't exit straight from an active chat. The first press
-    // exits a Grand Master session or clears the conversation back to the empty home
-    // state; only a second press (already on the empty home screen) exits the app.
-    val inActiveSession = uiState.activeGrandMaster != null ||
-        uiState.activeCustomGrandMaster != null ||
-        uiState.messages.isNotEmpty()
-    BackHandler(enabled = inActiveSession) {
-        when {
-            uiState.activeGrandMaster != null || uiState.activeCustomGrandMaster != null -> viewModel.exitGrandMaster()
-            else -> viewModel.startNewChat()
-        }
+    // clears the conversation back to the empty home state; only a second press
+    // (already on the empty home screen) exits the app.
+    BackHandler(enabled = uiState.messages.isNotEmpty()) {
+        viewModel.startNewChat()
     }
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
@@ -247,44 +238,6 @@ fun ChatScreen(
         )
     }
 
-    // Grand Master picker
-    if (uiState.showGrandMasterPicker) {
-        GrandMasterPickerSheet(
-            onDismiss = { viewModel.hideGrandMasterPicker() },
-            onSelect = { grandMaster -> viewModel.requestActivateGrandMaster(grandMaster) },
-            onSelectCustom = { custom -> viewModel.requestActivateCustomGrandMaster(custom) },
-            onCreateNew = { viewModel.hideGrandMasterPicker(); viewModel.showCreateGrandMaster() },
-            onDeleteCustom = { id -> viewModel.deleteCustomGrandMaster(id) },
-            onExportCustom = { id -> viewModel.exportCustomGrandMaster(id) },
-            onExportAll = { viewModel.exportAllCustomGrandMasters() },
-            onImportFromUri = { uri -> viewModel.importGrandMastersFromUri(uri) },
-            activeGrandMaster = uiState.activeGrandMaster,
-            activeCustomGrandMaster = uiState.activeCustomGrandMaster,
-            customGrandMasters = uiState.customGrandMasters
-        )
-    }
-
-    // Resume or Reset dialog
-    if (uiState.showResumeOrResetDialog) {
-        ResumeOrResetDialog(
-            title = uiState.pendingGrandMaster?.title ?: uiState.pendingCustomGrandMaster?.title ?: "Grand Master",
-            onResume = { viewModel.resumeGrandMasterChat() },
-            onReset = { viewModel.resetGrandMasterChat() },
-            onDismiss = { viewModel.dismissResumeOrResetDialog() }
-        )
-    }
-
-    // Create custom Grand Master
-    if (uiState.showCreateGrandMaster) {
-        CreateGrandMasterSheet(
-            onDismiss = { viewModel.hideCreateGrandMaster() },
-            onCreate = { icon, title, subtitle, desc, prompt, welcome ->
-                viewModel.createCustomGrandMaster(icon, title, subtitle, desc, prompt, welcome)
-            },
-            onCreateFromJson = { json -> viewModel.createCustomGrandMasterFromJson(json) }
-        )
-    }
-
     // Model configuration dialog
     if (uiState.showConfigDialog) {
         ModelConfigDialog(
@@ -329,43 +282,31 @@ fun ChatScreen(
             Surface(shadowElevation = 4.dp, color = MaterialTheme.colorScheme.surface) {
                 TopAppBar(
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
-                    navigationIcon = {
-                        if (uiState.activeGrandMaster != null || uiState.activeCustomGrandMaster != null) {
-                            IconButton(onClick = { viewModel.exitGrandMaster() }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Exit Grand Master", tint = MaterialTheme.colorScheme.onSurface)
-                            }
-                        }
-                    },
                     title = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             StatusDot(modelStatus = uiState.modelStatus)
                             Spacer(modifier = Modifier.width(12.dp))
                             Column(modifier = Modifier.clickable { showContextSheet = true }) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    val gmActive = uiState.activeGrandMaster != null || uiState.activeCustomGrandMaster != null
-                                    val gmDisplayTitle = uiState.activeGrandMaster?.let { "${it.icon} ${it.title}" }
-                                        ?: uiState.activeCustomGrandMaster?.let { "${it.icon} ${it.title}" }
-                                        ?: "MEDHA"
                                     Text(
-                                        gmDisplayTitle,
-                                        style = if (gmActive) MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold) else MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = 2.sp),
+                                        "MEDHA",
+                                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = 2.sp),
                                         color = MaterialTheme.colorScheme.primary
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Surface(
                                         shape = RoundedCornerShape(4.dp),
-                                        color = if (uiState.appMode is AppMode.Online) AccentCyan.copy(alpha = 0.15f) else AccentGreen.copy(alpha = 0.15f)
+                                        color = AccentGreen.copy(alpha = 0.15f)
                                     ) {
                                         Text(
-                                            if (uiState.appMode is AppMode.Online) "ONLINE" else "OFFLINE",
+                                            "ON-DEVICE",
                                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
-                                            color = if (uiState.appMode is AppMode.Online) AccentCyan else AccentGreen
+                                            color = AccentGreen
                                         )
                                     }
                                     // Context-usage % — tap (whole title) opens the full breakdown
-                                    val ctxReady = uiState.appMode is AppMode.Online ||
-                                        (uiState.modelStatus is ModelStatus.Ready && uiState.offlineContextLength > 0)
+                                    val ctxReady = uiState.modelStatus is ModelStatus.Ready && uiState.offlineContextLength > 0
                                     if (ctxReady) {
                                         // Recompute only when the conversation actually changes.
                                         // Without the remember this walks + tokenises every
@@ -373,10 +314,7 @@ fun ChatScreen(
                                         // recomposes the whole top bar.
                                         val ctxPct = remember(
                                             uiState.messages,
-                                            uiState.offlineContextLength,
-                                            uiState.appMode,
-                                            uiState.activeGrandMaster,
-                                            uiState.activeCustomGrandMaster
+                                            uiState.offlineContextLength
                                         ) { computeContextUsage(uiState).percent }
                                         val pctColor = if (ctxPct >= 85) StatusError else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                                         Spacer(modifier = Modifier.width(6.dp))
@@ -410,13 +348,6 @@ fun ChatScreen(
                             }
                         }
 
-                        // Primary: Grand Masters (when not in GM session)
-                        if (uiState.activeGrandMaster == null && uiState.activeCustomGrandMaster == null) {
-                            IconButton(onClick = { viewModel.showGrandMasterPicker() }) {
-                                Text("\uD83C\uDFC6", fontSize = 18.sp)
-                            }
-                        }
-
                         // Overflow menu for everything else
                         Box {
                             IconButton(onClick = { showOverflowMenu = true }) {
@@ -434,12 +365,10 @@ fun ChatScreen(
                                     text = { Text("\uD83D\uDCCA  Context window") },
                                     onClick = { showOverflowMenu = false; showContextSheet = true }
                                 )
-                                if (uiState.appMode is AppMode.Offline) {
-                                    DropdownMenuItem(
-                                        text = { Text("\u2699\uFE0F  Configurations") },
-                                        onClick = { showOverflowMenu = false; viewModel.showConfigDialog() }
-                                    )
-                                }
+                                DropdownMenuItem(
+                                    text = { Text("\u2699\uFE0F  Configurations") },
+                                    onClick = { showOverflowMenu = false; viewModel.showConfigDialog() }
+                                )
                                 if (uiState.messages.isNotEmpty()) {
                                     DropdownMenuItem(
                                         text = { Text("\uD83D\uDDD1\uFE0F  Clear Chat") },
@@ -489,8 +418,7 @@ fun ChatScreen(
                     uiState,
                     onRetry = { viewModel.initializeEngine() },
                     onViewLogs = onNavigateToLogs,
-                    onOpenSettings = onNavigateToSettings,
-                    onSelectGrandMaster = { viewModel.requestActivateGrandMaster(it) }
+                    onOpenSettings = onNavigateToSettings
                 )
             } else {
                 LazyColumn(
@@ -506,7 +434,7 @@ fun ChatScreen(
                             MessageBubble(
                                 message = message,
                                 viewModel = viewModel,
-                                aiName = uiState.activeGrandMaster?.title ?: uiState.activeCustomGrandMaster?.title ?: "Medha",
+                                aiName = "Medha",
                                 isLast = index == uiState.messages.lastIndex && !uiState.isGenerating
                             )
                         }
@@ -737,523 +665,6 @@ private fun ImageResponseStyleSheet(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun GrandMasterPickerSheet(
-    onDismiss: () -> Unit,
-    onSelect: (GrandMaster) -> Unit,
-    onSelectCustom: (CustomGrandMaster) -> Unit,
-    onCreateNew: () -> Unit,
-    onDeleteCustom: (String) -> Unit,
-    onExportCustom: (String) -> Unit,
-    onExportAll: () -> Unit,
-    onImportFromUri: (Uri) -> Unit,
-    activeGrandMaster: GrandMaster?,
-    activeCustomGrandMaster: CustomGrandMaster?,
-    customGrandMasters: List<CustomGrandMaster>
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val importLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { onImportFromUri(it) }
-    }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        "Grand Masters",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Text(
-                        "Start a specialized AI session with deep expertise",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-
-            LazyColumn(modifier = Modifier.weight(1f, fill = false)) {
-                // Built-in Grand Masters
-                item {
-                    Text(
-                        "Built-in",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = AccentGold,
-                        modifier = Modifier.padding(vertical = 4.dp)
-                    )
-                }
-                items(GrandMaster.entries.toList()) { gm ->
-                    val isActive = gm == activeGrandMaster
-                    GrandMasterCard(
-                        icon = gm.icon,
-                        title = gm.title,
-                        subtitle = gm.subtitle,
-                        description = gm.description,
-                        isActive = isActive,
-                        onClick = { if (!isActive) onSelect(gm) }
-                    )
-                }
-
-                // Custom Grand Masters
-                if (customGrandMasters.isNotEmpty()) {
-                    item {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            "Your Grand Masters",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = AccentCyan,
-                            modifier = Modifier.padding(vertical = 4.dp)
-                        )
-                    }
-                    items(customGrandMasters, key = { it.id }) { custom ->
-                        val isActive = custom.id == activeCustomGrandMaster?.id
-                        GrandMasterCard(
-                            icon = custom.icon,
-                            title = custom.title,
-                            subtitle = custom.subtitle,
-                            description = custom.description,
-                            isActive = isActive,
-                            isCustom = true,
-                            onClick = { if (!isActive) onSelectCustom(custom) },
-                            onDelete = { onDeleteCustom(custom.id) },
-                            onExport = { onExportCustom(custom.id) }
-                        )
-                    }
-                }
-
-                // Action buttons
-                item {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Surface(
-                        onClick = onCreateNew,
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Text("+", fontSize = 24.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                "Create Your Grand Master",
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        // Import button
-                        Surface(
-                            onClick = { importLauncher.launch("application/json") },
-                            shape = RoundedCornerShape(12.dp),
-                            color = AccentCyan.copy(alpha = 0.1f),
-                            border = BorderStroke(1.dp, AccentCyan.copy(alpha = 0.3f)),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                Text("\uD83D\uDCE5", fontSize = 16.sp)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Import", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = AccentCyan)
-                            }
-                        }
-                        // Export All button
-                        if (customGrandMasters.isNotEmpty()) {
-                            Surface(
-                                onClick = onExportAll,
-                                shape = RoundedCornerShape(12.dp),
-                                color = AccentGold.copy(alpha = 0.1f),
-                                border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.3f)),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    Text("\uD83D\uDCE4", fontSize = 16.sp)
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Export All", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = AccentGold)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun GrandMasterCard(
-    icon: String,
-    title: String,
-    subtitle: String,
-    description: String,
-    isActive: Boolean,
-    isCustom: Boolean = false,
-    onClick: () -> Unit,
-    onDelete: (() -> Unit)? = null,
-    onExport: (() -> Unit)? = null
-) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(16.dp),
-        color = if (isActive)
-            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-        else
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-        border = if (isActive) BorderStroke(
-            2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-        ) else null,
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(icon, fontSize = 32.sp)
-            Spacer(modifier = Modifier.width(14.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        title,
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    if (isActive) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = StatusSuccess.copy(alpha = 0.15f)
-                        ) {
-                            Text(
-                                "ACTIVE",
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
-                                color = StatusSuccess
-                            )
-                        }
-                    }
-                    if (isCustom) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = AccentCyan.copy(alpha = 0.15f)
-                        ) {
-                            Text(
-                                "CUSTOM",
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
-                                color = AccentCyan
-                            )
-                        }
-                    }
-                }
-                if (subtitle.isNotBlank()) {
-                    Text(
-                        subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
-                    )
-                }
-                if (description.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        description,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                    )
-                }
-            }
-            if (isCustom) {
-                if (onExport != null) {
-                    IconButton(onClick = onExport, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Default.Share, "Export", modifier = Modifier.size(18.dp), tint = AccentCyan.copy(alpha = 0.7f))
-                    }
-                }
-                if (onDelete != null && !isActive) {
-                    IconButton(onClick = onDelete, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Default.Delete, "Delete", modifier = Modifier.size(18.dp), tint = StatusError.copy(alpha = 0.6f))
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ResumeOrResetDialog(
-    title: String,
-    onResume: () -> Unit,
-    onReset: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title, fontWeight = FontWeight.Bold) },
-        text = {
-            Text("You have a previous chat session with this Grand Master. Would you like to continue where you left off or start fresh?")
-        },
-        confirmButton = {
-            TextButton(onClick = onResume) {
-                Text("Continue Chat", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onReset) {
-                Text("Start Fresh", color = StatusWarning)
-            }
-        },
-        containerColor = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(20.dp)
-    )
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun CreateGrandMasterSheet(
-    onDismiss: () -> Unit,
-    onCreate: (icon: String, title: String, subtitle: String, description: String, systemPrompt: String, welcomeMessage: String) -> Unit,
-    onCreateFromJson: (String) -> Unit
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var useJsonMode by remember { mutableStateOf(false) }
-
-    // Form fields
-    var icon by remember { mutableStateOf("") }
-    var title by remember { mutableStateOf("") }
-    var subtitle by remember { mutableStateOf("") }
-    var description by remember { mutableStateOf("") }
-    var systemPrompt by remember { mutableStateOf("") }
-    var welcomeMessage by remember { mutableStateOf("") }
-    var jsonText by remember { mutableStateOf("") }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp)
-                .verticalScroll(rememberScrollState())
-        ) {
-            Text(
-                "Create Grand Master",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                "Define your own AI expert with custom rules and personality",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Toggle between form and JSON mode
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Surface(
-                    onClick = { useJsonMode = false },
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (!useJsonMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
-                ) {
-                    Text(
-                        "Form",
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        color = if (!useJsonMode) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                Surface(
-                    onClick = { useJsonMode = true },
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (useJsonMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
-                ) {
-                    Text(
-                        "JSON",
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        color = if (useJsonMode) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            if (useJsonMode) {
-                Text(
-                    "Paste your Grand Master JSON configuration:",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // JSON example hint
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text(
-                        "{\n  \"icon\": \"\uD83C\uDF1F\",\n  \"title\": \"My Expert\",\n  \"subtitle\": \"Expert in ...\",\n  \"description\": \"Short description\",\n  \"systemPrompt\": \"You are an expert in...\",\n  \"welcomeMessage\": \"Hello! I'm your...\"\n}",
-                        modifier = Modifier.padding(12.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = jsonText,
-                    onValueChange = { jsonText = it },
-                    modifier = Modifier.fillMaxWidth().height(200.dp),
-                    placeholder = { Text("Paste JSON here...") },
-                    textStyle = MaterialTheme.typography.bodySmall,
-                    maxLines = 15,
-                    shape = RoundedCornerShape(12.dp)
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-                Surface(
-                    onClick = { if (jsonText.isNotBlank()) onCreateFromJson(jsonText) },
-                    shape = RoundedCornerShape(12.dp),
-                    color = if (jsonText.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        "Create from JSON",
-                        modifier = Modifier.padding(14.dp),
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = if (jsonText.isNotBlank()) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-                    )
-                }
-            } else {
-                // Form mode
-                OutlinedTextField(
-                    value = icon,
-                    onValueChange = { icon = it },
-                    label = { Text("Icon (emoji)") },
-                    placeholder = { Text("e.g. \uD83C\uDF1F \uD83E\uDD16 \uD83C\uDFA8") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("Title *") },
-                    placeholder = { Text("e.g. Fitness Coach") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = subtitle,
-                    onValueChange = { subtitle = it },
-                    label = { Text("Subtitle") },
-                    placeholder = { Text("e.g. Personal Training Expert") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = description,
-                    onValueChange = { description = it },
-                    label = { Text("Description") },
-                    placeholder = { Text("Short description of expertise") },
-                    modifier = Modifier.fillMaxWidth(),
-                    maxLines = 2,
-                    shape = RoundedCornerShape(12.dp)
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = systemPrompt,
-                    onValueChange = { systemPrompt = it },
-                    label = { Text("System Prompt / Rules *") },
-                    placeholder = { Text("Define how this Grand Master should behave, what rules to follow, expertise areas, tone, restrictions...") },
-                    modifier = Modifier.fillMaxWidth().height(150.dp),
-                    maxLines = 10,
-                    shape = RoundedCornerShape(12.dp)
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = welcomeMessage,
-                    onValueChange = { welcomeMessage = it },
-                    label = { Text("Welcome Message") },
-                    placeholder = { Text("First message shown when user starts a session") },
-                    modifier = Modifier.fillMaxWidth(),
-                    maxLines = 3,
-                    shape = RoundedCornerShape(12.dp)
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-                val canCreate = title.isNotBlank() && systemPrompt.isNotBlank()
-                Surface(
-                    onClick = { if (canCreate) onCreate(icon, title, subtitle, description, systemPrompt, welcomeMessage) },
-                    shape = RoundedCornerShape(12.dp),
-                    color = if (canCreate) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        "Create Grand Master",
-                        modifier = Modifier.padding(14.dp),
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = if (canCreate) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-                    )
-                }
-            }
-        }
-    }
-}
-
 @Composable
 private fun StatusDot(modelStatus: ModelStatus) {
     val color = when (modelStatus) {
@@ -1273,7 +684,7 @@ private fun StatusDot(modelStatus: ModelStatus) {
 }
 
 @Composable
-private fun WelcomeContent(uiState: ChatState, onRetry: () -> Unit, onViewLogs: () -> Unit, onOpenSettings: () -> Unit, onSelectGrandMaster: (GrandMaster) -> Unit = {}) {
+private fun WelcomeContent(uiState: ChatState, onRetry: () -> Unit, onViewLogs: () -> Unit, onOpenSettings: () -> Unit) {
     Column(
         modifier = Modifier.fillMaxSize().padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1300,38 +711,27 @@ private fun WelcomeContent(uiState: ChatState, onRetry: () -> Unit, onViewLogs: 
                     Spacer(modifier = Modifier.weight(1f))
                     Surface(
                         shape = RoundedCornerShape(8.dp),
-                        color = if (uiState.appMode is AppMode.Online) AccentCyan.copy(alpha = 0.15f) else AccentGreen.copy(alpha = 0.15f)
+                        color = AccentGreen.copy(alpha = 0.15f)
                     ) {
                         Text(
-                            if (uiState.appMode is AppMode.Online) "Online" else "Offline",
+                            "On-device",
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                             style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold,
-                            color = if (uiState.appMode is AppMode.Online) AccentCyan else AccentGreen
+                            color = AccentGreen
                         )
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
 
-                if (uiState.appMode is AppMode.Offline && uiState.selectedModel != null) {
+                if (uiState.selectedModel != null) {
                     Text("Model: ${uiState.selectedModel.displayName}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = AccentGold)
                     Text("${uiState.selectedModel.fileName}  \u2022  ${uiState.selectedModel.sizeInMb} MB", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
-                    Spacer(modifier = Modifier.height(6.dp))
-                } else if (uiState.appMode is AppMode.Online) {
-                    Text("Model: ${uiState.onlineModelName}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = AccentCyan)
-                    val activeKey = uiState.activeKey
-                    if (activeKey != null) {
-                        Text(
-                            "Key: ${activeKey.label} \u2022 ${activeKey.selectedModels.size} model(s)",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-                        )
-                    }
                     Spacer(modifier = Modifier.height(6.dp))
                 }
 
                 Text(getDetailedStatusText(uiState), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
 
-                if (uiState.modelStatus is ModelStatus.ModelNotFound && uiState.appMode is AppMode.Offline) {
+                if (uiState.modelStatus is ModelStatus.ModelNotFound) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(12.dp)) {
                         Column(modifier = Modifier.padding(16.dp)) {
@@ -1343,26 +743,11 @@ private fun WelcomeContent(uiState: ChatState, onRetry: () -> Unit, onViewLogs: 
                         }
                     }
                 }
-                if (uiState.modelStatus is ModelStatus.Error && uiState.appMode is AppMode.Online && uiState.apiKeys.isEmpty()) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(12.dp)) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text("Online Setup", style = MaterialTheme.typography.labelLarge, color = AccentCyan, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            SetupStep("1", "Get API key from Google AI Studio")
-                            SetupStep("2", "Go to Settings and enter your API key")
-                            SetupStep("3", "Start chatting with Gemini!")
-                        }
-                    }
-                }
-
                 if (uiState.modelStatus !is ModelStatus.Ready) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        if (uiState.appMode is AppMode.Offline) {
-                            Surface(onClick = onRetry, shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.primary) {
-                                Text("Retry", modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp), color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelLarge)
-                            }
+                        Surface(onClick = onRetry, shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.primary) {
+                            Text("Retry", modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp), color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelLarge)
                         }
                         Surface(onClick = onOpenSettings, shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
                             Text("Settings", modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge)
@@ -1377,44 +762,11 @@ private fun WelcomeContent(uiState: ChatState, onRetry: () -> Unit, onViewLogs: 
 
         if (uiState.modelStatus is ModelStatus.Ready) {
             Spacer(modifier = Modifier.height(24.dp))
-            Text("Type a message or start a Grand Master session", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f))
-
-            Spacer(modifier = Modifier.height(16.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                GrandMaster.entries.forEach { gm ->
-                    Surface(
-                        onClick = { onSelectGrandMaster(gm) },
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                        modifier = Modifier.width(140.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(14.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(gm.icon, fontSize = 28.sp)
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                gm.title.replace("Grand Master", "GM"),
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary,
-                                maxLines = 1
-                            )
-                            Text(
-                                gm.subtitle,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-            }
+            Text(
+                "Everything runs on this device. Type a message to begin.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+            )
         }
     }
 }
@@ -1516,11 +868,7 @@ private fun MessageBubble(message: Message, viewModel: ChatViewModel, aiName: St
                         }
                         if (message.provider.isNotBlank()) {
                             Text("\u00B7", fontSize = 9.sp, color = dotColor)
-                            val provColor = when (message.provider) {
-                                "offline" -> Color(0xFF4CAF50)
-                                "gemini" -> Color(0xFF4285F4)
-                                else -> statColor
-                            }
+                            val provColor = if (message.provider == "offline") Color(0xFF4CAF50) else statColor
                             Text(message.provider.uppercase(), fontSize = 8.sp, fontWeight = FontWeight.Bold, color = provColor)
                         }
                     }
@@ -2167,13 +1515,7 @@ private fun ChatInputBar(
 }
 
 private fun getSubtitleText(uiState: ChatState): String {
-    val modelName = when (uiState.appMode) {
-        is AppMode.Online -> {
-            val keyLabel = uiState.activeKey?.label
-            if (keyLabel != null) "${uiState.onlineModelName} ($keyLabel)" else uiState.onlineModelName
-        }
-        is AppMode.Offline -> uiState.selectedModel?.displayName ?: "No model"
-    }
+    val modelName = uiState.selectedModel?.displayName ?: "No model"
     val statusText = when (uiState.modelStatus) {
         is ModelStatus.Idle -> "Idle"
         is ModelStatus.Initializing -> "Loading..."
@@ -2184,19 +1526,11 @@ private fun getSubtitleText(uiState: ChatState): String {
         is ModelStatus.PermissionRequired -> "Permission needed"
         is ModelStatus.Downloading -> "Downloading..."
     }
-    // Context length is a real, finite limit only for offline models \u2014 show it there.
-    // Online (Gemini) context is effectively unlimited, so no meter is shown.
-    val ctxText = if (uiState.appMode is AppMode.Offline &&
-        uiState.modelStatus is ModelStatus.Ready &&
-        uiState.offlineContextLength > 0
-    ) {
+    val ctxText = if (uiState.modelStatus is ModelStatus.Ready && uiState.offlineContextLength > 0) {
         " \u2022 ${formatContextLength(uiState.offlineContextLength)} ctx"
     } else ""
-    // Show MTP (speculative decoding) badge when the offline engine has it active.
-    val mtpText = if (uiState.appMode is AppMode.Offline &&
-        uiState.modelStatus is ModelStatus.Ready &&
-        uiState.offlineMtpActive
-    ) " \u2022 MTP" else ""
+    // Show MTP (speculative decoding) badge when the engine has it active.
+    val mtpText = if (uiState.modelStatus is ModelStatus.Ready && uiState.offlineMtpActive) " \u2022 MTP" else ""
     return "$modelName \u2022 $statusText$ctxText$mtpText"
 }
 
@@ -2214,15 +1548,11 @@ private class ContextUsage(val total: Int, val systemTokens: Int, val messageTok
     val percent: Int get() = if (total > 0) (used * 100 / total).coerceIn(0, 100) else 0
 }
 
-/** Estimate how much of the context window is in use. Offline uses the engine's real
- *  window; online uses Gemini's ~1M window. Assistant replies use exact counts; user
- *  text and the system prompt are estimated. */
+/** Estimate how much of the context window is in use, against the engine's real
+ *  window. Assistant replies use exact counts; user text is estimated. */
 private fun computeContextUsage(uiState: ChatState): ContextUsage {
-    val isOnline = uiState.appMode is AppMode.Online
-    val total = (if (isOnline) 1_048_576 else uiState.offlineContextLength).coerceAtLeast(1)
-    val systemText = uiState.activeGrandMaster?.systemPrompt
-        ?: uiState.activeCustomGrandMaster?.systemPrompt ?: ""
-    val systemTokens = estimateTokens(systemText)
+    val total = uiState.offlineContextLength.coerceAtLeast(1)
+    val systemTokens = 0
     val messageTokens = uiState.messages.sumOf { m ->
         val body = if (m.tokenCount > 0) m.tokenCount else estimateTokens(m.text)
         body + estimateTokens(m.thinkingText ?: "")
@@ -2238,14 +1568,13 @@ private fun fmtTokens(n: Int): String = when {
 
 /**
  * Context-window usage breakdown, styled after the Claude desktop panel: a segmented
- * bar plus a legend of System prompt / Messages / Free space with token counts and %.
- * Offline uses the engine's real context window; online uses Gemini's ~1M window.
+ * bar plus a legend of Messages / Free space with token counts and %, measured
+ * against the on-device engine's real context window.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ContextWindowSheet(uiState: ChatState, onDismiss: () -> Unit) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val isOnline = uiState.appMode is AppMode.Online
     val usage = computeContextUsage(uiState)
     val total = usage.total
     val systemTokens = usage.systemTokens
@@ -2281,7 +1610,7 @@ private fun ContextWindowSheet(uiState: ChatState, onDismiss: () -> Unit) {
             }
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                if (isOnline) "Gemini • ${uiState.onlineModelName}" else (uiState.selectedModel?.displayName ?: "Offline model"),
+                uiState.selectedModel?.displayName ?: "On-device model",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
             )
@@ -2301,8 +1630,7 @@ private fun ContextWindowSheet(uiState: ChatState, onDismiss: () -> Unit) {
 
             Spacer(modifier = Modifier.height(14.dp))
             Text(
-                "Token counts are estimated (~4 chars/token); assistant replies use the model's exact count." +
-                    if (isOnline) " Online sends the full history each turn." else "",
+                "Token counts are estimated (~4 chars/token); assistant replies use the model's exact count.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
             )
@@ -2338,7 +1666,7 @@ private fun getDetailedStatusText(uiState: ChatState): String = when (uiState.mo
     is ModelStatus.Idle -> "The AI engine has not started yet."
     is ModelStatus.Initializing -> "Loading model into memory..."
     is ModelStatus.Loading -> "Loading: ${(uiState.modelStatus as ModelStatus.Loading).detail}"
-    is ModelStatus.Ready -> if (uiState.appMode is AppMode.Online) "Connected to Gemini API. Start chatting below." else "Offline engine ready (LiteRT LM). Start chatting below."
+    is ModelStatus.Ready -> "On-device engine ready (LiteRT LM). Start chatting below."
     is ModelStatus.Error -> "Error: ${uiState.modelStatus.message}"
     is ModelStatus.ModelNotFound -> "No models found. Download one from Settings \u2192 Model Catalog."
     is ModelStatus.PermissionRequired -> "Cannot read model file."

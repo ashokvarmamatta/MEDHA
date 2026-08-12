@@ -10,7 +10,7 @@
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
 
-# Runtime annotations + generic signatures are required by Moshi/Retrofit reflection.
+# Runtime annotations + generic signatures are required by Room's generated code.
 -keepattributes Signature,InnerClasses,EnclosingMethod
 -keepattributes RuntimeVisibleAnnotations,RuntimeVisibleParameterAnnotations
 -keepattributes AnnotationDefault
@@ -28,49 +28,14 @@
 }
 
 # ---------------------------------------------------------------------------
-# Moshi — reflective adapters (KotlinJsonAdapterFactory) + codegen
+# Domain models
+#
+# Moshi/Retrofit/OkHttp rules were dropped along with the cloud path — the app has
+# no HTTP client left. The model download uses HttpURLConnection, which needs none.
 # ---------------------------------------------------------------------------
--keep class com.squareup.moshi.** { *; }
--keep interface com.squareup.moshi.** { *; }
--keep @com.squareup.moshi.JsonQualifier @interface *
--keepclassmembers class * {
-    @com.squareup.moshi.FromJson <methods>;
-    @com.squareup.moshi.ToJson <methods>;
-}
--keepclasseswithmembers class * {
-    @com.squareup.moshi.* <methods>;
-}
-# Generated adapters look up their target by name.
--if @com.squareup.moshi.JsonClass class *
--keep class <1>JsonAdapter {
-    <init>(...);
-    <fields>;
-}
--keepnames @com.squareup.moshi.JsonClass class *
-
-# The Gemini DTOs are parsed reflectively — keep them and their members intact.
--keep class com.ashes.dev.works.ai.neural.brain.medha.data.remote.** { *; }
 # Domain models are serialized by hand (org.json) but are also stored in Room.
 -keep class com.ashes.dev.works.ai.neural.brain.medha.domain.model.** { *; }
-
-# ---------------------------------------------------------------------------
-# Retrofit + OkHttp
-# ---------------------------------------------------------------------------
--keepattributes Exceptions
--dontwarn retrofit2.**
--dontwarn okhttp3.**
--dontwarn okio.**
--dontwarn org.codehaus.mojo.animal_sniffer.IgnoreJRERequirement
--dontwarn org.conscrypt.**
--dontwarn org.bouncycastle.**
--dontwarn org.openjsse.**
-# Retrofit service interfaces are implemented by a runtime proxy.
--keep,allowobfuscation,allowshrinking interface retrofit2.Call
--keep,allowobfuscation,allowshrinking class retrofit2.Response
 -keep,allowobfuscation,allowshrinking class kotlin.coroutines.Continuation
--if interface * { @retrofit2.http.* <methods>; }
--keep,allowobfuscation interface <1>
--keep,allowobfuscation,allowshrinking @interface retrofit2.http.**
 
 # ---------------------------------------------------------------------------
 # Room — entities/DAOs are reached from generated code and by name

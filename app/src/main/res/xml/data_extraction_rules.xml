@@ -3,9 +3,8 @@
   Backup / transfer policy (role 22 — "backup rules exclude tokens, session data and PII").
 
   android:allowBackup="false" already blocks cloud backup, but device-to-device transfer
-  is a SEPARATE channel and is still allowed unless excluded here. The settings DataStore
-  holds the user's Gemini API keys, the Room DB holds every chat, and medha_models holds
-  multi-GB model files — none of it should leave the device.
+  is a SEPARATE channel and is still allowed unless excluded here. The Room DB holds every
+  chat and medha_models holds multi-GB model files — none of it should leave the device.
 -->
 <data-extraction-rules>
     <cloud-backup>

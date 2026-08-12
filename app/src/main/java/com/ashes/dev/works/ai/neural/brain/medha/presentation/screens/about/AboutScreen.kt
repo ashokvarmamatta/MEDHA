@@ -94,9 +94,9 @@ fun AboutScreen(onNavigateBack: () -> Unit) {
 
             InfoSection("What is MEDHA?", Icons.Default.Info, AccentCyan) {
                 Text(
-                    text = "MEDHA (Mobile Edge Device Hybrid AI) is an offline-first AI chat application. " +
-                            "It runs Gemma 4 models on-device via LiteRT LM for fully private conversations with vision, audio & thinking. " +
-                            "For enhanced capabilities, connect to online APIs like Google Gemini with multi-key failover.",
+                    text = "MEDHA (Mobile Edge Device Hybrid AI) is an on-device AI chat application. " +
+                            "It runs Gemma 4 models locally via LiteRT LM for fully private conversations with vision, audio & thinking. " +
+                            "Your prompts never leave your phone \u2014 there is no cloud mode and no account.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
                 )
@@ -105,64 +105,52 @@ fun AboutScreen(onNavigateBack: () -> Unit) {
             Spacer(modifier = Modifier.height(16.dp))
 
             InfoSection("Key Features", Icons.Default.Star, AccentGold) {
-                FeatureItem("Offline First", "Run Gemma 4 locally with LiteRT LM - vision, audio & thinking")
-                FeatureItem("Online Mode", "Connect to Gemini API with multi-key failover")
-                FeatureItem("Grand Masters", "Specialized AI personas - Chess, Health, Code, Career + create your own")
-                FeatureItem("Chat Persistence", "Grand Master chats are saved - resume or start fresh anytime")
-                FeatureItem("Custom Grand Masters", "Create your own AI expert via form or JSON configuration")
+                FeatureItem("Fully On-Device", "Run Gemma 4 locally with LiteRT LM - vision, audio & thinking")
+                FeatureItem("Chat History", "Conversations are saved on-device - resume or start fresh anytime")
                 FeatureItem("Image Analysis", "Upload images for AI-powered analysis, OCR, and descriptions")
                 FeatureItem("22 Prompt Templates", "One-tap templates across 6 categories")
-                FeatureItem("Private & Secure", "Offline mode keeps all data on your device")
+                FeatureItem("Shared Model Folder", "Keep one copy of the weights across your AI apps")
+                FeatureItem("Private & Secure", "No account, no telemetry, no prompt ever leaves the device")
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            InfoSection("Offline Setup", Icons.Default.Build, AccentGreen) {
+            InfoSection("Setup", Icons.Default.Build, AccentGreen) {
                 GuideStep("1", "Download Model", "Download a .litertlm model from Settings \u2192 Model Catalog.")
-                GuideStep("2", "Import Model", "Go to Settings > Offline Models and tap 'Import Model File'.")
+                GuideStep("2", "Import Model", "Go to Settings > Models and tap 'Import Model File'.")
                 GuideStep("3", "Select Model", "Pick the imported model from the list.")
                 GuideStep("4", "Start Chatting", "The engine loads automatically. Type your first message!")
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            InfoSection("Online Setup", Icons.Default.Build, AccentCyan) {
-                GuideStep("1", "Get API Key", "Go to Settings for a list of free & paid API key providers.")
-                GuideStep("2", "Switch Mode", "Go to Settings and switch to Online Mode.")
-                GuideStep("3", "Add API Key", "Paste your key, add a label, and test it.")
-                GuideStep("4", "Start Chatting", "Select a model and start chatting!")
-            }
 
             Spacer(modifier = Modifier.height(16.dp))
 
             InfoSection("Tips for Best Results", Icons.Default.CheckCircle, AccentGreen) {
                 TipItem("Keep prompts clear and concise for better responses")
-                TipItem("Online mode provides more accurate and detailed responses")
-                TipItem("Offline mode works best with English and simple questions")
-                TipItem("First offline load takes 30-60 seconds depending on device")
-                TipItem("Use Grand Masters for focused, expert-level conversations")
-                TipItem("Go to Settings for model download links and API key providers")
+                TipItem("On-device models work best with English and simple questions")
+                TipItem("First load takes 30-60 seconds depending on device")
+                TipItem("A larger model is slower but noticeably more capable")
+                TipItem("Go to Settings for model download links")
                 TipItem("Use the Logs screen to diagnose any issues")
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
             InfoSection("Limitations", Icons.Default.Warning, AccentGold) {
-                TipItem("Offline: On-device models may produce less accurate responses than cloud")
-                TipItem("Offline: Complex reasoning and math may not be reliable")
-                TipItem("Online: Requires active internet connection")
-                TipItem("Online: API keys are stored locally (not encrypted)")
-                TipItem("Currently supports Gemini API format - other providers coming soon")
+                TipItem("On-device models may produce less accurate responses than cloud services")
+                TipItem("Complex reasoning and math may not be reliable")
+                TipItem("Large models need plenty of free RAM and storage")
+                TipItem("Downloading a model needs internet; running one never does")
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
             InfoSection("Privacy & Data", Icons.Default.Lock, AccentCyan) {
                 Text(
-                    text = "In Offline mode, MEDHA processes everything on your device. No data leaves your phone. " +
-                            "In Online mode, your prompts are sent to the API provider's servers for processing. " +
-                            "API keys and Grand Master chat history are stored locally on your device via DataStore. " +
-                            "Custom Grand Master configurations are also stored locally.",
+                    text = "MEDHA processes everything on your device \u2014 no prompt, image or reply is ever " +
+                            "sent anywhere. Chats are stored locally in an on-device database, and app settings " +
+                            "in DataStore. The only time MEDHA uses the network is when you explicitly download " +
+                            "a model file from the catalog.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
                 )
@@ -172,7 +160,7 @@ fun AboutScreen(onNavigateBack: () -> Unit) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
             Spacer(modifier = Modifier.height(16.dp))
             Text("Built with Jetpack Compose & LiteRT LM", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f), textAlign = TextAlign.Center)
-            Text("Gemma 4 by Google \u2022 LiteRT LM \u2022 Gemini API by Google", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f), textAlign = TextAlign.Center)
+            Text("Gemma 4 by Google \u2022 LiteRT LM", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f), textAlign = TextAlign.Center)
             Spacer(modifier = Modifier.height(24.dp))
         }
     }

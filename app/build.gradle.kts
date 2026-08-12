@@ -83,16 +83,14 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.coil.compose)
-    implementation(libs.retrofit)
-    implementation(libs.converter.moshi)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.core)
     // Removed (role 11 — unused dependencies): accompanist-permissions,
     // play-services-location and the four CameraX artifacts had zero imports anywhere in
     // app/src. They only added download size and third-party manifest entries.
-    implementation(libs.logging.interceptor)
-    implementation(libs.okhttp)
-    implementation(libs.moshi.kotlin)
+    // Removed with the cloud path: retrofit, converter-moshi, okhttp, logging-interceptor
+    // and moshi. The only network call left is the model download, which uses
+    // HttpURLConnection directly — no HTTP client library needed.
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.material)
     implementation(libs.litertlm)
@@ -110,5 +108,4 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     "ksp"(libs.androidx.room.compiler)
-    "ksp"(libs.moshi.kotlin.codegen)
 }
